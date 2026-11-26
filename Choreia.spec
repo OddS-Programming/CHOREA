@@ -1,15 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('assets/app.ico', 'assets')]
+datas = [('src/choreia/web', 'choreia/web')]
 binaries = []
-hiddenimports = []
-tmp_ret = collect_all('tkinterdnd2')
+hiddenimports = ['clr']
+tmp_ret = collect_all('webview')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['tools/run_gui.py'],
+    ['tools/run_app.py'],
     pathex=[],
     binaries=binaries,
     datas=datas,
