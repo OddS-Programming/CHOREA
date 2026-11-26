@@ -132,6 +132,27 @@ def test_album_artist_falls_back_to_solo_track(tmp_path: Path) -> None:
     library.close()
 
 
+def test_browse_signature_changes_only_with_content(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    folder = tmp_path / "Album"
+    folder.mkdir()
+    track = folder / "one.mp3"
+    track.write_bytes(b"x")
+    library.upsert_track(path=str(track), title="One", artist="A", album="Album", duration=10)
+
+    first = library.browse(str(folder))
+    assert first["signature"]
+    assert library.browse(str(folder))["signature"] == first["signature"]
+
+    (folder / "Extras").mkdir()
+    assert library.browse(str(folder))["signature"] != first["signature"]
+
+    second = library.browse(str(folder))
+    library.upsert_track(path=str(track), title="Renamed", artist="A", album="Album", duration=10)
+    assert library.browse(str(folder))["signature"] != second["signature"]
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

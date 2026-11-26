@@ -255,6 +255,27 @@ class Library:
         except OSError:
             pass
 
+        # Cheap change detector: the client re-renders the folder only when it differs,
+        # so an unchanged folder is never repainted and cannot flicker.
+        import hashlib
+
+        signature = hashlib.sha1(
+            "\n".join(
+                [f"f:{name}" for name in sorted(folders)]
+                + [
+                    "t:{}:{}:{}:{}:{}:{}".format(
+                        row["id"],
+                        row["path"],
+                        row["title"],
+                        row["artist"],
+                        row["album"],
+                        row["duration"],
+                    )
+                    for row in tracks
+                ]
+            ).encode("utf-8")
+        ).hexdigest()
+
         return {
             "path": directory,
             "folders": [
@@ -262,6 +283,7 @@ class Library:
                 for name, count in sorted(folders.items(), key=lambda item: item[0].lower())
             ],
             "tracks": tracks,
+            "signature": signature,
         }
 
     def album_tracks(self, album: str, album_artist: str = "") -> list[dict]:

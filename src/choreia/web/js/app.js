@@ -736,23 +736,27 @@ function renderCollection() {
 
 async function openFolder(path, push = true) {
   try {
-    const data = await API.get("browse", { path });
-    if (push) state.folderStack.push(data.path);
-    state.view = "folder";
-    state.collection = {
-      kind: "folder",
-      path: data.path,
-      folders: data.folders,
-      tracks: data.tracks,
-      parent: state.folderStack.length > 1,
-    };
-    state.selection = new Set();
-    state.lastSelected = null;
-    el.crumbs.textContent = data.path.split(/[\\/]/).filter(Boolean).pop() || data.path;
-    renderCollection();
+    applyFolderData(await API.get("browse", { path }), push);
   } catch (error) {
     toast(`Не удалось открыть папку: ${error.message}`);
   }
+}
+
+function applyFolderData(data, push = true) {
+  if (push) state.folderStack.push(data.path);
+  state.view = "folder";
+  state.collection = {
+    kind: "folder",
+    path: data.path,
+    folders: data.folders,
+    tracks: data.tracks,
+    signature: data.signature,
+    parent: state.folderStack.length > 1,
+  };
+  state.selection = new Set();
+  state.lastSelected = null;
+  el.crumbs.textContent = data.path.split(/[\\/]/).filter(Boolean).pop() || data.path;
+  renderCollection();
 }
 
 async function folderBack() {
@@ -884,24 +888,76 @@ async function handleUpload(files) {
   await loadTracks();
 }
 
+let refreshing = false;
+
+function sameTrackList(left, right) {
+  if (!left || !right || left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (a.id !== b.id) return false;
+    if ((a.title || "") !== (b.title || "")) return false;
+    if ((a.artist || "") !== (b.artist || "")) return false;
+    if ((a.album || "") !== (b.album || "")) return false;
+    if ((a.cover_hash || "") !== (b.cover_hash || "")) return false;
+  }
+  return true;
+}
+
 async function refreshCurrentView() {
+  if (refreshing) return;
+  if (document.hidden) return;
   if (state.selection.size) return;
   if (!el.askModal.hidden || !el.editModal.hidden || !el.lyricsModal.hidden) return;
-  const scroller = document.querySelector("#view .scroll, #view .list-body");
-  const top = scroller ? scroller.scrollTop : 0;
 
-  if (state.view === "folder" && state.collection?.path) {
-    await openFolder(state.collection.path, false);
-  } else if (state.view === "album" && state.collection?.album) {
-    await openAlbum(state.collection.album, state.collection.artist);
-  } else if (state.view === "library") {
-    await loadTracks();
-  } else if (state.view === "folders") {
-    await renderFolders();
+  const scroller = () => document.querySelector("#view .scroll, #view .list-body");
+  const top = scroller()?.scrollTop || 0;
+
+  refreshing = true;
+  el.view.classList.add("quiet-refresh");
+  try {
+    if (state.view === "folder" && state.collection?.path) {
+      const data = await API.get("browse", { path: state.collection.path });
+      if (data.signature !== state.collection.signature) applyFolderData(data, false);
+    } else if (state.view === "library") {
+      const payload = await API.get("tracks", {
+        sort: state.sort, q: state.query, limit: 1000, offset: 0,
+      });
+      if (!sameTrackList(payload.tracks, state.tracks) || payload.total !== state.total) {
+        state.tracks = payload.tracks;
+        state.total = payload.total;
+        renderLibrary();
+        updatePlayingMark();
+      }
+    } else if (state.view === "album" && state.collection?.album) {
+      const data = await API.get("albums/tracks", {
+        album: state.collection.album, artist: state.collection.artist || "",
+      });
+      if (!sameTrackList(data.tracks, state.collection.tracks)) {
+        await openAlbum(state.collection.album, state.collection.artist);
+      }
+    } else if (state.view === "folders") {
+      const payload = await API.get("folders");
+      const before = state.folders.map((folder) => folder.path).join("\n");
+      const after = payload.folders.map((folder) => folder.path).join("\n");
+      if (before !== after) {
+        state.folders = payload.folders;
+        await renderFolders();
+      }
+    }
+  } catch (error) {
+    /* a transient refresh failure must not disturb the current view */
+  } finally {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        el.view.classList.remove("quiet-refresh");
+        refreshing = false;
+      });
+    });
   }
 
-  const again = document.querySelector("#view .scroll, #view .list-body");
-  if (again) again.scrollTop = top;
+  const again = scroller();
+  if (again && top) again.scrollTop = top;
 }
 
 function renderPlaceholder(title, text) {
