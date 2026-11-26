@@ -601,6 +601,7 @@ async function openPlaylist(id) {
     state.playlist = data;
     state.queue = data.tracks.map((track) => track.id);
     state.queueIndex = -1;
+    state.history = [];
     el.crumbs.textContent = data.playlist.name;
     el.view.innerHTML = `
       <div class="playlist-toolbar">
@@ -1577,6 +1578,7 @@ el.selectionPlay.addEventListener("click", () => {
   if (!ids.length) return;
   state.queue = ids;
   state.queueIndex = 0;
+  state.history = [];
   playTrack(ids[0]);
 });
 el.selectionClear.addEventListener("click", () => {
