@@ -501,7 +501,7 @@ button { font: inherit; color: inherit; }
 /* ---------------------------------------------------------- now playing UI */
 .np-controls { display: flex; align-items: center; gap: 14px; margin-top: 2px; }
 .np-controls .play-btn { width: 54px; height: 54px; font-size: 20px; }
-.np-seek-row { display: flex; align-items: center; gap: 12px; width: min(560px, 82vw); }
+.np-seek-row { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 560px; }
 .np-seek-row .seek { flex: 1; }
 .np-volume { width: 92px; }
 .np-actions { display: flex; gap: 10px; }

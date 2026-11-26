@@ -75,6 +75,8 @@ const el = {
   npLyrics: document.getElementById("np-lyrics"),
   npBody: document.getElementById("np-body"),
   npLyricsToggle: document.getElementById("np-lyrics-toggle"),
+  npLeft: document.querySelector(".np-left"),
+  npRight: document.querySelector(".np-right"),
   npLyricsEdit: document.getElementById("np-lyrics-edit"),
   lyricsModal: document.getElementById("lyrics-modal"),
   lyricsForm: document.getElementById("lyrics-form"),
@@ -1066,7 +1068,24 @@ function lyricsHaveText() {
 function applyLyricsVisibility() {
   const hasText = lyricsHaveText();
   const shown = hasText && state.lyricsVisible;
-  el.npBody.classList.toggle("with-lyrics", shown);
+  const wasShown = el.npBody.classList.contains("with-lyrics");
+
+  if (shown !== wasShown) {
+    const first = el.npLeft.getBoundingClientRect();
+    el.npBody.classList.toggle("with-lyrics", shown);
+    const last = el.npLeft.getBoundingClientRect();
+    const shift = first.left - last.left;
+    if (Math.abs(shift) > 1 && el.npLeft.animate) {
+      el.npLeft.animate(
+        [{ transform: `translateX(${shift}px)` }, { transform: "translateX(0)" }],
+        { duration: 340, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+      );
+    }
+    if (shown && el.npRight.animate) {
+      el.npRight.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: "ease" });
+    }
+  }
+
   el.npLyricsToggle.disabled = !hasText;
   setIcon(el.npLyricsToggle, state.lyricsVisible ? "eye" : "eye-off");
 }
