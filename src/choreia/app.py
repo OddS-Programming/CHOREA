@@ -76,7 +76,9 @@ def load_credentials(library: Library, directory: Path) -> None:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return
-    if payload.get("genius_token"):
+    if payload.get("genius_token") and library.setting("genius_token") is None:
+        # Seed once: a token saved or cleared in the settings window must win
+        # over the file on the next launch.
         library.set_setting("genius_token", str(payload["genius_token"]))
 
 

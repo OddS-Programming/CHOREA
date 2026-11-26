@@ -649,13 +649,64 @@ def test_diagnostics_reports_version_and_cache(server) -> None:
     assert payload["version"]
     assert payload["cache_bytes"] == 2048
     assert payload["genius_configured"] is False
+    assert payload["genius_state"] == "none"
     assert Path(payload["data_dir"]) == root.parent.parent
 
-    _post(running, "/api/settings", {"key": "genius_token", "value": "secret"})
+
+def test_diagnostics_reports_the_genius_token_state(server, monkeypatch) -> None:
+    from choreia.sources import covers
+
+    running, library, _track = server
+    monkeypatch.setattr(covers, "check_token", lambda token: token == "good")
+
+    library.set_setting("genius_token", "bad")
     _status, _headers, body = _get(
         running, "/api/diagnostics", {"X-Token": running.context.token}
     )
-    assert json.loads(body)["genius_configured"] is True
+    assert json.loads(body)["genius_state"] == "invalid"
+
+    library.set_setting("genius_token", "good")
+    running.context.genius_check = None
+    _status, _headers, body = _get(
+        running, "/api/diagnostics", {"X-Token": running.context.token}
+    )
+    assert json.loads(body)["genius_state"] == "ok"
+
+    library.set_setting("genius_token", "")
+    running.context.genius_check = None
+    _status, _headers, body = _get(
+        running, "/api/diagnostics", {"X-Token": running.context.token}
+    )
+    assert json.loads(body)["genius_state"] == "none"
+
+
+def test_settings_reject_an_invalid_genius_token(server, monkeypatch) -> None:
+    from choreia.sources import covers
+
+    running, library, _track = server
+    monkeypatch.setattr(covers, "check_token", lambda token: False)
+
+    status, payload = _post(
+        running, "/api/settings", {"key": "genius_token", "value": "bad-token"}
+    )
+
+    assert status == 400
+    assert "401" in payload["error"]
+    assert not library.setting("genius_token")
+
+
+def test_settings_store_a_valid_genius_token(server, monkeypatch) -> None:
+    from choreia.sources import covers
+
+    running, library, _track = server
+    monkeypatch.setattr(covers, "check_token", lambda token: True)
+
+    status, _payload = _post(
+        running, "/api/settings", {"key": "genius_token", "value": "good-token"}
+    )
+
+    assert status == 200
+    assert library.setting("genius_token") == "good-token"
 
 
 def test_clear_cache_keeps_original_covers(server) -> None:

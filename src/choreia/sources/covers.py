@@ -209,6 +209,28 @@ def _score(item: dict, artist: str, album: str, title: str) -> int:
     return score
 
 
+def check_token(token: str) -> bool:
+    """Return True when Genius accepts the token for search.
+
+    `/account` needs a user OAuth token, so a normal client access token must be
+    checked through the search endpoint instead. Network errors propagate.
+    """
+    if not _clean(token):
+        return False
+    import urllib.error
+
+    try:
+        data = _get_json(
+            "https://api.genius.com/search?" + urllib.parse.urlencode({"q": "test"}),
+            {"Authorization": f"Bearer {token.strip()}"},
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return False
+        raise
+    return isinstance(data, dict) and "response" in data
+
+
 def search(artist: str, album: str, title: str, genius_token: str = "", limit: int = 10) -> list[dict]:
     """Find cover candidates for one track. Network errors simply yield fewer results."""
     artist, album, title = _clean(artist), _clean(album), _clean(title)

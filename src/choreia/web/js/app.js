@@ -1265,9 +1265,12 @@ async function openSettings() {
     el.cacheHint.textContent = data.cache_bytes
       ? `Занято ${formatBytes(data.cache_bytes)}`
       : "Кэш пуст";
-    el.geniusHint.textContent = data.genius_configured
-      ? "Токен сохранён — Genius участвует в поиске обложек"
-      : "Не задан — поиск обложек работает без Genius";
+    el.geniusHint.textContent = {
+      none: "Не задан — Genius не используется, обложки ищутся в iTunes, Deezer и Cover Art Archive",
+      ok: "Токен действителен — Genius участвует в поиске обложек",
+      invalid: "Токен не принят Genius (401) — удалите его или вставьте новый",
+      error: "Не удалось проверить токен — нет связи с Genius",
+    }[data.genius_state] || "Не задан — Genius не используется, обложки ищутся в iTunes, Deezer и Cover Art Archive";
   } catch (error) {
     el.geniusHint.textContent = "Не удалось прочитать настройки";
   }
@@ -1290,11 +1293,12 @@ async function saveGeniusToken() {
     await API.post("settings", { key: "genius_token", value });
     el.settingGenius.value = "";
     el.geniusHint.textContent = value
-      ? "Токен сохранён — Genius участвует в поиске обложек"
-      : "Не задан — поиск обложек работает без Genius";
+      ? "Токен действителен — Genius участвует в поиске обложек"
+      : "Не задан — Genius не используется, обложки ищутся в iTunes, Deezer и Cover Art Archive";
     toast(value ? "Токен Genius сохранён" : "Токен Genius удалён");
   } catch (error) {
-    toast("Не удалось сохранить токен");
+    el.geniusHint.textContent = error.message;
+    toast("Токен не сохранён");
   } finally {
     el.settingGeniusSave.disabled = false;
   }

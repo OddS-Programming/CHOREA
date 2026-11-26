@@ -134,6 +134,27 @@ def test_search_drops_unrelated_candidates(monkeypatch) -> None:
     assert covers.search("Radiohead", "Pablo Honey", "Creep") == []
 
 
+def test_check_token_accepts_a_valid_token(monkeypatch) -> None:
+    monkeypatch.setattr(covers, "_get_json", lambda url, headers=None: {"response": {}})
+
+    assert covers.check_token("token") is True
+
+
+def test_check_token_rejects_401(monkeypatch) -> None:
+    import urllib.error
+
+    def denied(url, headers=None):
+        raise urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)
+
+    monkeypatch.setattr(covers, "_get_json", denied)
+
+    assert covers.check_token("token") is False
+
+
+def test_check_token_requires_a_value() -> None:
+    assert covers.check_token("   ") is False
+
+
 def test_prepare_resizes_large_art(monkeypatch) -> None:
     monkeypatch.setattr(covers, "_get", lambda url, headers=None: _jpeg((3000, 3000)))
 

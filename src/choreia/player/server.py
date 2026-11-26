@@ -126,6 +126,25 @@ class AppContext:
         self._scan_thread: threading.Thread | None = None
         self._last_prune = 0.0
         self.covers: dict[str, str] = {}
+        self.genius_check: tuple[float, str] | None = None
+
+    def genius_state(self) -> str:
+        token = self.library.setting("genius_token") or ""
+        if not token:
+            self.genius_check = None
+            return "none"
+        import time
+
+        if self.genius_check and time.monotonic() - self.genius_check[0] < 300:
+            return self.genius_check[1]
+        from ..sources.covers import check_token
+
+        try:
+            state = "ok" if check_token(token) else "invalid"
+        except Exception:
+            state = "error"
+        self.genius_check = (time.monotonic(), state)
+        return state
 
     def maybe_prune(self) -> None:
         """Drop rows for files deleted outside the app, at most every 20 seconds."""
@@ -581,11 +600,26 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/settings":
             payload = self._read_json()
-            key = payload.get("key")
+            key = str(payload.get("key") or "")
             if not key:
                 self._error(400, "key required")
                 return
-            self.context.library.set_setting(str(key), str(payload.get("value", "")))
+            value = str(payload.get("value", ""))
+            if key == "genius_token":
+                value = value.strip()
+                if value:
+                    from ..sources.covers import check_token
+
+                    try:
+                        accepted = check_token(value)
+                    except Exception:
+                        self._error(502, "Не удалось проверить токен Genius — нет связи")
+                        return
+                    if not accepted:
+                        self._error(400, "Genius не принял токен (401)")
+                        return
+                self.context.genius_check = None
+            self.context.library.set_setting(key, value)
             self._json({"ok": True})
             return
         self._error(404, "not found")
@@ -951,6 +985,7 @@ class Handler(BaseHTTPRequestHandler):
                     "data_dir": str(root.parent.parent),
                     "cache_bytes": cache_bytes,
                     "genius_configured": bool(library.setting("genius_token")),
+                    "genius_state": self.context.genius_state(),
                 }
             )
             return

@@ -7,7 +7,14 @@ async function request(path, options = {}) {
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || response.statusText);
+    let message = text || response.statusText;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.error) message = parsed.error;
+    } catch (error) {
+      /* plain text or empty body */
+    }
+    throw new Error(message);
   }
   return response.json();
 }
