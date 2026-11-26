@@ -622,6 +622,20 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True})
             return
 
+        if path == "/api/cache":
+            root = self.context.thumbs.root
+            removed = 0
+            freed = 0
+            for item in root.glob("*-*.jpg"):
+                try:
+                    freed += item.stat().st_size
+                    item.unlink()
+                    removed += 1
+                except OSError:
+                    continue
+            self._json({"removed": removed, "freed": freed})
+            return
+
         playlist_match = re.match(r"^/api/playlists/(\d+)/tracks/(\d+)$", path)
         if playlist_match:
             self.context.library.remove_from_playlist(
@@ -919,6 +933,29 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "scan/status":
             self._json(self.context.scan.snapshot())
+            return
+        if route == "diagnostics":
+            from .. import __version__
+
+            root = self.context.thumbs.root
+            rendered = [path for path in root.glob("*-*.jpg") if path.is_file()]
+            cache_bytes = 0
+            for path in rendered:
+                try:
+                    cache_bytes += path.stat().st_size
+                except OSError:
+                    continue
+            self._json(
+                {
+                    "version": __version__,
+                    "data_dir": str(root.parent.parent),
+                    "cache_bytes": cache_bytes,
+                    "genius_configured": bool(library.setting("genius_token")),
+                }
+            )
+            return
+        if route == "preferences":
+            self._json({"preferences": library.settings_with_prefix("ui.")})
             return
         if route == "settings":
             key = (query.get("key") or [""])[0]

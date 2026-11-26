@@ -527,6 +527,13 @@ class Library:
             row = self._conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
         return row["value"] if row else default
 
+    def settings_with_prefix(self, prefix: str) -> dict[str, str]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT key, value FROM settings WHERE key LIKE ?", (prefix + "%",)
+            ).fetchall()
+        return {row["key"]: row["value"] for row in rows}
+
     def set_setting(self, key: str, value: str) -> None:
         with self._lock:
             self._conn.execute(

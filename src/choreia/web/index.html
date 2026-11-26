@@ -33,6 +33,7 @@
     </nav>
     <div class="sidebar-foot">
       <button class="ghost" id="add-folder">Добавить папку</button>
+      <button class="ghost" id="open-settings">Настройки</button>
       <div class="hint" id="scan-hint"></div>
     </div>
   </aside>
@@ -205,6 +206,56 @@
       <button type="submit" class="play-btn modal-save">Сохранить</button>
     </div>
   </form>
+</div>
+
+<div class="modal" id="settings-modal" hidden>
+  <div class="modal-card settings-card">
+    <div class="modal-head">
+      <div class="modal-title">Настройки</div>
+      <button type="button" class="icon-btn" id="settings-close" title="Закрыть">✕</button>
+    </div>
+
+    <label class="setting-row">
+      <span>
+        <b>Автопоиск текстов</b>
+        <small>Искать текст в LRCLIB, когда у трека его ещё нет</small>
+      </span>
+      <input class="settings-toggle" type="checkbox" id="setting-autolyrics">
+    </label>
+
+    <div class="setting-row column">
+      <span>
+        <b>Токен Genius</b>
+        <small id="genius-hint">Проверяю…</small>
+      </span>
+      <div class="setting-inline">
+        <input class="settings-input" id="setting-genius" type="password" autocomplete="off"
+               placeholder="Вставьте токен">
+        <button type="button" class="ghost" id="setting-genius-save">Сохранить</button>
+      </div>
+    </div>
+
+    <div class="setting-row">
+      <span>
+        <b>Миниатюры обложек</b>
+        <small id="cache-hint">—</small>
+      </span>
+      <button type="button" class="ghost" id="setting-cache-clear">Очистить</button>
+    </div>
+
+    <div class="setting-row">
+      <span>
+        <b>Папка данных</b>
+        <small id="data-hint">library.db, кэш и токены</small>
+      </span>
+      <button type="button" class="ghost" id="setting-data-open">Открыть</button>
+    </div>
+
+    <div class="modal-actions">
+      <span class="settings-version" id="setting-version"></span>
+      <button type="button" class="play-btn modal-save" id="settings-done">Готово</button>
+    </div>
+  </div>
 </div>
 
 <div class="modal" id="ask-modal" hidden>

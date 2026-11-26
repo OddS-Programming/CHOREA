@@ -226,6 +226,18 @@ def test_albums_fall_back_to_the_first_covered_track(tmp_path: Path) -> None:
     library.close()
 
 
+def test_settings_with_prefix_filters_keys(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.set_setting("ui.lyricsVisible", "0")
+    library.set_setting("ui.autoLyrics", "1")
+    library.set_setting("genius_token", "secret")
+
+    prefs = library.settings_with_prefix("ui.")
+
+    assert prefs == {"ui.lyricsVisible": "0", "ui.autoLyrics": "1"}
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

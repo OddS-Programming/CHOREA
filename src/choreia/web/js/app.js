@@ -21,8 +21,8 @@ const state = {
   lyricLines: [],
   lyricIndex: -1,
   followPauseUntil: 0,
-  lyricsVisible: localStorage.getItem("choreia.lyricsVisible") !== "0",
-  autoLyrics: localStorage.getItem("choreia.autoLyrics") !== "0",
+  lyricsVisible: true,
+  autoLyrics: true,
   lyricsSkipped: new Set(),
   askResolve: null,
   askMode: "text",
@@ -114,6 +114,19 @@ const el = {
   coverFile: document.getElementById("cover-file"),
   coverHint: document.getElementById("cover-hint"),
   coverAll: document.getElementById("cover-all"),
+  settingsModal: document.getElementById("settings-modal"),
+  openSettings: document.getElementById("open-settings"),
+  settingsClose: document.getElementById("settings-close"),
+  settingAutoLyrics: document.getElementById("setting-autolyrics"),
+  settingGenius: document.getElementById("setting-genius"),
+  settingGeniusSave: document.getElementById("setting-genius-save"),
+  geniusHint: document.getElementById("genius-hint"),
+  cacheHint: document.getElementById("cache-hint"),
+  settingCacheClear: document.getElementById("setting-cache-clear"),
+  dataHint: document.getElementById("data-hint"),
+  settingDataOpen: document.getElementById("setting-data-open"),
+  settingVersion: document.getElementById("setting-version"),
+  settingsDone: document.getElementById("settings-done"),
   coverResults: document.getElementById("cover-results"),
   coverSave: document.getElementById("cover-save"),
   coverCancel: document.getElementById("cover-cancel"),
@@ -189,6 +202,19 @@ for (const [id, name] of Object.entries({
 }
 
 /* ------------------------------------------------------------------ utils */
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value <= 0) return "0 Б";
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size >= 10 || index === 0 ? Math.round(size) : size.toFixed(1)} ${units[index]}`;
+}
+
 function formatTime(seconds) {
   if (!seconds || Number.isNaN(seconds)) return "0:00";
   const total = Math.max(0, Math.round(seconds));
@@ -939,7 +965,7 @@ async function refreshCurrentView() {
   if (refreshing) return;
   if (document.hidden) return;
   if (state.selection.size) return;
-  if (!el.askModal.hidden || !el.editModal.hidden || !el.lyricsModal.hidden || !el.coverModal.hidden) return;
+  if (!el.askModal.hidden || !el.editModal.hidden || !el.lyricsModal.hidden || !el.coverModal.hidden || !el.settingsModal.hidden) return;
 
   const scroller = () => document.querySelector("#view .scroll, #view .list-body");
   const top = scroller()?.scrollTop || 0;
@@ -1223,6 +1249,80 @@ function closeEditor() {
   state.editCover = { action: "keep", dataUrl: null };
 }
 
+/* --------------------------------------------------------------- settings */
+async function openSettings() {
+  el.settingsModal.hidden = false;
+  el.settingAutoLyrics.checked = state.autoLyrics;
+  el.settingGenius.value = "";
+  el.settingVersion.textContent = "";
+  el.geniusHint.textContent = "Проверяю…";
+  el.cacheHint.textContent = "…";
+  try {
+    const data = await API.get("diagnostics");
+    state.diagnostics = data;
+    el.settingVersion.textContent = `χορεία ${data.version}`;
+    el.dataHint.textContent = data.data_dir;
+    el.cacheHint.textContent = data.cache_bytes
+      ? `Занято ${formatBytes(data.cache_bytes)}`
+      : "Кэш пуст";
+    el.geniusHint.textContent = data.genius_configured
+      ? "Токен сохранён — Genius участвует в поиске обложек"
+      : "Не задан — поиск обложек работает без Genius";
+  } catch (error) {
+    el.geniusHint.textContent = "Не удалось прочитать настройки";
+  }
+}
+
+function closeSettings() {
+  el.settingsModal.hidden = true;
+}
+
+function setAutoLyrics(enabled) {
+  state.autoLyrics = enabled;
+  savePreference("ui.autoLyrics", enabled ? "1" : "0");
+  if (enabled && state.currentId && !lyricsHaveText()) loadLyrics(state.currentId);
+}
+
+async function saveGeniusToken() {
+  const value = el.settingGenius.value.trim();
+  el.settingGeniusSave.disabled = true;
+  try {
+    await API.post("settings", { key: "genius_token", value });
+    el.settingGenius.value = "";
+    el.geniusHint.textContent = value
+      ? "Токен сохранён — Genius участвует в поиске обложек"
+      : "Не задан — поиск обложек работает без Genius";
+    toast(value ? "Токен Genius сохранён" : "Токен Genius удалён");
+  } catch (error) {
+    toast("Не удалось сохранить токен");
+  } finally {
+    el.settingGeniusSave.disabled = false;
+  }
+}
+
+async function clearThumbCache() {
+  el.settingCacheClear.disabled = true;
+  try {
+    const result = await API.del("cache");
+    el.cacheHint.textContent = "Кэш пуст";
+    toast(result.removed ? `Освобождено ${formatBytes(result.freed)}` : "Кэш уже пуст");
+  } catch (error) {
+    toast("Не удалось очистить кэш");
+  } finally {
+    el.settingCacheClear.disabled = false;
+  }
+}
+
+async function openDataFolder() {
+  const path = state.diagnostics?.data_dir;
+  if (!path) return;
+  try {
+    await API.post("reveal", { path });
+  } catch (error) {
+    toast("Папка не найдена");
+  }
+}
+
 /* ------------------------------------------------------------ album cover */
 function openAlbumCover() {
   if (state.view !== "album" || !state.collection?.album) {
@@ -1500,8 +1600,29 @@ async function applyLyricsVisibility(animated = true) {
 
 function toggleLyrics() {
   state.lyricsVisible = !state.lyricsVisible;
-  localStorage.setItem("choreia.lyricsVisible", state.lyricsVisible ? "1" : "0");
+  savePreference("ui.lyricsVisible", state.lyricsVisible ? "1" : "0");
   applyLyricsVisibility();
+}
+
+function savePreference(key, value) {
+  API.post("settings", { key, value }).catch(() => {});
+}
+
+async function loadPreferences() {
+  try {
+    const data = await API.get("preferences");
+    const prefs = data.preferences || {};
+    if (prefs["ui.lyricsVisible"] !== undefined) {
+      state.lyricsVisible = prefs["ui.lyricsVisible"] !== "0";
+    }
+    if (prefs["ui.autoLyrics"] !== undefined) {
+      state.autoLyrics = prefs["ui.autoLyrics"] !== "0";
+    }
+  } catch (error) {
+    /* first launch: keep the defaults */
+  }
+  setIcon(el.npLyricsToggle, state.lyricsVisible ? "eye" : "eye-off");
+  applyLyricsVisibility(false);
 }
 
 function renderLyrics() {
@@ -1892,6 +2013,23 @@ el.coverClose.addEventListener("click", closeAlbumCover);
 el.coverModal.addEventListener("click", (event) => {
   if (event.target === el.coverModal) closeAlbumCover();
 });
+
+el.openSettings.addEventListener("click", openSettings);
+el.settingsClose.addEventListener("click", closeSettings);
+el.settingsDone.addEventListener("click", closeSettings);
+el.settingsModal.addEventListener("click", (event) => {
+  if (event.target === el.settingsModal) closeSettings();
+});
+el.settingAutoLyrics.addEventListener("change", () => setAutoLyrics(el.settingAutoLyrics.checked));
+el.settingGeniusSave.addEventListener("click", saveGeniusToken);
+el.settingGenius.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    saveGeniusToken();
+  }
+});
+el.settingCacheClear.addEventListener("click", clearThumbCache);
+el.settingDataOpen.addEventListener("click", openDataFolder);
 el.editModal.addEventListener("click", (event) => {
   if (event.target === el.editModal) closeEditor();
 });
@@ -1956,7 +2094,7 @@ el.uploadFiles.addEventListener("change", async () => {
   el.uploadFiles.value = "";
   if (files.length) await handleUpload(files);
 });
-applyLyricsVisibility();
+loadPreferences();
 
 window.addEventListener("focus", () => {
   refreshCurrentView();
@@ -1999,6 +2137,7 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "KeyL") toggleLyrics();
   if (event.code === "Escape") {
     if (!el.askModal.hidden) closeAsk(state.askMode === "text" ? null : false);
+    else if (!el.settingsModal.hidden) closeSettings();
     else if (!el.coverModal.hidden) closeAlbumCover();
     else if (!el.lyricsModal.hidden) closeLyricsEditor();
     else if (!el.editModal.hidden) closeEditor();

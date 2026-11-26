@@ -636,6 +636,63 @@ def test_scan_reports_a_thread_that_cannot_start(server, tmp_path, monkeypatch) 
     assert "thread" in (context.scan.snapshot()["error"] or "")
 
 
+def test_diagnostics_reports_version_and_cache(server) -> None:
+    running, _library, _track = server
+    root = running.context.thumbs.root
+    (root / "abc-320.jpg").write_bytes(b"x" * 2048)
+    (root / "abc.src").write_bytes(b"y" * 4096)
+
+    status, _headers, body = _get(running, "/api/diagnostics", {"X-Token": running.context.token})
+    payload = json.loads(body)
+
+    assert status == 200
+    assert payload["version"]
+    assert payload["cache_bytes"] == 2048
+    assert payload["genius_configured"] is False
+    assert Path(payload["data_dir"]) == root.parent.parent
+
+    _post(running, "/api/settings", {"key": "genius_token", "value": "secret"})
+    _status, _headers, body = _get(
+        running, "/api/diagnostics", {"X-Token": running.context.token}
+    )
+    assert json.loads(body)["genius_configured"] is True
+
+
+def test_clear_cache_keeps_original_covers(server) -> None:
+    running, _library, _track = server
+    root = running.context.thumbs.root
+    (root / "abc-320.jpg").write_bytes(b"x" * 1024)
+    (root / "abc-640.jpg").write_bytes(b"x" * 512)
+    (root / "abc.src").write_bytes(b"original")
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{running.port}/api/cache",
+        method="DELETE",
+        headers={"X-Token": running.context.token},
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        payload = json.loads(response.read())
+
+    assert payload == {"removed": 2, "freed": 1536}
+    assert (root / "abc.src").exists()
+
+
+def test_preferences_expose_only_ui_settings(server) -> None:
+    running, library, _track = server
+    library.set_setting("ui.autoLyrics", "0")
+    library.set_setting("genius_token", "secret")
+
+    status, _headers, body = _get(running, "/api/preferences", {"X-Token": running.context.token})
+
+    assert status == 200
+    assert json.loads(body)["preferences"] == {"ui.autoLyrics": "0"}
+
+    _post(running, "/api/settings", {"key": "ui.lyricsVisible", "value": "1"})
+    _status, _headers, body = _get(running, "/api/preferences", {"X-Token": running.context.token})
+
+    assert json.loads(body)["preferences"]["ui.lyricsVisible"] == "1"
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 
