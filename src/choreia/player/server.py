@@ -304,6 +304,27 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"paths": pick_files()})
             return
 
+        if path == "/api/add-path":
+            from ..library.scanner import AUDIO_SUFFIXES
+
+            payload = self._read_json()
+            target = Path(str(payload.get("path", "")).strip())
+            if target.is_dir():
+                folder_id = self.context.library.add_folder(target)
+                started = self.context.start_scan(target)
+                self._json({"kind": "folder", "id": folder_id, "started": started})
+                return
+            if target.is_file() and target.suffix.lower() in AUDIO_SUFFIXES:
+                try:
+                    refresh_track(self.context.library, self.context.thumbs, target)
+                except Exception as exc:
+                    self._error(500, f"cannot read: {exc}")
+                    return
+                self._json({"kind": "file", "added": 1})
+                return
+            self._error(404, "path not found")
+            return
+
         if path == "/api/add-files":
             from ..library.scanner import AUDIO_SUFFIXES
 

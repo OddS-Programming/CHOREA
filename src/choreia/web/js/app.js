@@ -53,6 +53,7 @@ const el = {
   now: document.getElementById("now"),
   nowplaying: document.getElementById("nowplaying"),
   npBackdrop: document.getElementById("np-backdrop"),
+  npBackdropB: document.getElementById("np-backdrop-b"),
   npExit: document.getElementById("np-exit-zone"),
   npCover: document.getElementById("np-cover"),
   npTitle: document.getElementById("np-title"),
@@ -72,6 +73,7 @@ const el = {
   npEdit: document.getElementById("np-edit"),
   npLyrics: document.getElementById("np-lyrics"),
   npBody: document.getElementById("np-body"),
+  npLyricsToggle: document.getElementById("np-lyrics-toggle"),
   npLyricsEdit: document.getElementById("np-lyrics-edit"),
   lyricsModal: document.getElementById("lyrics-modal"),
   lyricsForm: document.getElementById("lyrics-form"),
@@ -118,6 +120,21 @@ let analyser = null;
 let spectrumFrame = null;
 let listBody = null;
 let rowsEl = null;
+let backdropLayer = null;
+
+function setBackdrop(track) {
+  const next = backdropLayer === el.npBackdrop ? el.npBackdropB : el.npBackdrop;
+  if (track.cover_hash) {
+    next.classList.remove("plain");
+    next.style.backgroundImage = `url("${API.thumb(track.cover_hash, 320)}")`;
+  } else {
+    next.style.backgroundImage = "";
+    next.classList.add("plain");
+  }
+  next.classList.add("visible");
+  if (backdropLayer) backdropLayer.classList.remove("visible");
+  backdropLayer = next;
+}
 
 const ICONS = {
   play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
@@ -130,6 +147,8 @@ const ICONS = {
   volume: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>',
   mute: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.6 3 2.4 2.4-1.4 1.4L15.2 13l-2.4 2.4-1.4-1.4L13.8 12l-2.4-2.4 1.4-1.4L15.2 11l2.4-2.4 1.4 1.4z"/></svg>',
   lyrics: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/></svg>',
+  eye: '<svg viewBox="0 0 24 24"><path d="M12 5c5 0 9.3 3 11 7-1.7 4-6 7-11 7S2.7 16 1 12c1.7-4 6-7 11-7zm0 11a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm0-2a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>',
+  "eye-off": '<svg viewBox="0 0 24 24"><path d="M12 5c5 0 9.3 3 11 7a13 13 0 0 1-3.1 4.1l-1.5-1.5A10.9 10.9 0 0 0 20.6 12C19 9.2 15.7 7 12 7c-.7 0-1.4.1-2 .2L8.4 5.6C9.5 5.2 10.7 5 12 5zm0 14c-5 0-9.3-3-11-7a13 13 0 0 1 3.1-4.1l1.5 1.5A10.9 10.9 0 0 0 3.4 12C5 14.8 8.3 17 12 17c.7 0 1.4-.1 2-.2l1.6 1.6c-1.1.4-2.3.6-3.6.6zM3.3 3.3l17.4 17.4-1.4 1.4L1.9 4.7z"/></svg>',
 };
 
 function setIcon(button, name) {
@@ -305,13 +324,7 @@ function updateNow(track) {
   el.npAlbum.textContent = track.album || "";
   setCover(el.nowCover, track, 320);
   setCover(el.npCover, track, 640);
-  if (track.cover_hash) {
-    el.npBackdrop.classList.remove("plain");
-    el.npBackdrop.style.backgroundImage = `url("${API.thumb(track.cover_hash, 320)}")`;
-  } else {
-    el.npBackdrop.style.backgroundImage = "";
-    el.npBackdrop.classList.add("plain");
-  }
+  setBackdrop(track);
   document.title = `${track.title || "χορεία"} — χορεία`;
   syncTransport();
   if ("mediaSession" in navigator) {
@@ -805,25 +818,45 @@ function switchView(view) {
 
 /* ------------------------------------------------------------------- scan */
 async function addFolder() {
-  let folder = null;
+  const path = await askText(
+    "Добавить папку",
+    state.collection?.path || "C:\\",
+    "Полный путь к папке с музыкой"
+  );
+  if (!path) return;
   try {
-    const response = await API.post("pick-folder", {});
-    folder = response.path;
-  } catch (error) {
-    folder = null;
-  }
-  if (!folder && window.pywebview && window.pywebview.api) {
-    folder = await window.pywebview.api.pick_folder();
-  }
-  if (Array.isArray(folder)) folder = folder[0];
-  if (!folder) return;
-  try {
-    await API.post("folders", { path: folder });
-    const result = await API.post("scan", { path: folder });
-    if (!result.started) toast("Сканирование уже идёт");
+    await API.post("folders", { path });
+    const result = await API.post("scan", { path });
+    toast(result.started ? "Папка добавлена, сканирую…" : "Сканирование уже идёт");
+    if (state.view === "folders") await renderFolders();
     pollScan();
   } catch (error) {
-    toast(`Не удалось добавить папку: ${error.message}`);
+    toast("Папка не найдена или недоступна");
+  }
+}
+
+async function addTracksFromPath() {
+  const base = state.collection?.path || "C:\\";
+  const path = await askText(
+    "Добавить треки",
+    base.endsWith("\\") ? base : base + "\\",
+    "Путь к файлу или папке"
+  );
+  if (!path) return;
+  try {
+    const result = await API.post("add-path", { path });
+    if (result.kind === "folder") {
+      toast(result.started ? "Сканирую папку…" : "Сканирование уже идёт");
+      pollScan();
+    } else {
+      toast(`Добавлено треков: ${result.added}`);
+      if (state.view === "folder" && state.collection?.path) {
+        await openFolder(state.collection.path, false);
+      }
+      await loadTracks();
+    }
+  } catch (error) {
+    toast("Путь не найден или это не аудиофайл");
   }
 }
 
@@ -844,7 +877,10 @@ function pollScan() {
         toast(`Добавлено ${added}, обновлено ${updated}, удалено ${removed}`);
       }
       await loadTracks();
-      if (state.view === "folders") renderFolders();
+      if (state.view === "folders") await renderFolders();
+      if (state.view === "folder" && state.collection?.path) {
+        await openFolder(state.collection.path, false);
+      }
     } catch (error) {
       clearInterval(state.scanTimer);
       el.scanHint.textContent = "";
@@ -1146,17 +1182,7 @@ el.view.addEventListener("click", async (event) => {
     return;
   }
   if (event.target.id === "folder-add-tracks") {
-    try {
-      const picked = await API.post("pick-files", {});
-      if (picked.paths && picked.paths.length) {
-        const result = await API.post("add-files", { paths: picked.paths });
-        toast(`Добавлено треков: ${result.added}`);
-        await openFolder(state.collection.path, false);
-        await loadTracks();
-      }
-    } catch (error) {
-      toast(`Не удалось добавить треки: ${error.message}`);
-    }
+    await addTracksFromPath();
     return;
   }
   const subfolder = event.target.closest("[data-subfolder]");

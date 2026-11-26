@@ -286,6 +286,24 @@ def test_add_files_indexes_tracks(server, tmp_path) -> None:
     assert library.track_by_path(str(extra)) is not None
 
 
+def test_add_path_handles_file_and_folder(server, tmp_path) -> None:
+    import helpers
+
+    running, _library, _track = server
+    extra = helpers.copy_asset("mp3", tmp_path / "extra.mp3")
+
+    status, payload = _post(running, "/api/add-path", {"path": str(extra)})
+    assert status == 200
+    assert payload["kind"] == "file" and payload["added"] == 1
+
+    status, payload = _post(running, "/api/add-path", {"path": str(tmp_path)})
+    assert status == 200
+    assert payload["kind"] == "folder"
+
+    status, _payload = _post(running, "/api/add-path", {"path": str(tmp_path / "missing")})
+    assert status == 404
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 
