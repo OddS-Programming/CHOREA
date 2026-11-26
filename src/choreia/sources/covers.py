@@ -36,14 +36,7 @@ def _clean(value: str) -> str:
     return " ".join((value or "").split())
 
 
-def _itunes(artist: str, album: str, title: str) -> list[dict]:
-    term = _clean(" ".join(part for part in (artist, album) if part)) or _clean(title)
-    if not term:
-        return []
-    entity = "album" if _clean(album) else "song"
-    params = {"term": term, "entity": entity, "limit": 8}
-    if _clean(album):
-        params["attribute"] = "albumTerm"
+def _itunes_query(params: dict) -> list[dict]:
     data = _get_json("https://itunes.apple.com/search?" + urllib.parse.urlencode(params))
     found = []
     for item in data.get("results", []) if isinstance(data, dict) else []:
@@ -62,15 +55,20 @@ def _itunes(artist: str, album: str, title: str) -> list[dict]:
     return found
 
 
-def _deezer(artist: str, album: str, title: str) -> list[dict]:
-    if _clean(album):
-        query = f'artist:"{_clean(artist)}" album:"{_clean(album)}"'
-        url = "https://api.deezer.com/search/album?" + urllib.parse.urlencode({"q": query, "limit": 8})
-    else:
-        query = _clean(f"{artist} {title}")
-        url = "https://api.deezer.com/search?" + urllib.parse.urlencode({"q": query, "limit": 8})
-    if not query.strip('" '):
+def _itunes(artist: str, album: str, title: str) -> list[dict]:
+    term = _clean(" ".join(part for part in (artist, album) if part)) or _clean(title)
+    if not term:
         return []
+    if _clean(album):
+        found = _itunes_query(
+            {"term": term, "entity": "album", "attribute": "albumTerm", "limit": 8}
+        )
+        if found:
+            return found
+    return _itunes_query({"term": _clean(f"{artist} {title}") or term, "entity": "song", "limit": 8})
+
+
+def _deezer_query(url: str) -> list[dict]:
     data = _get_json(url)
     items = data.get("data", []) if isinstance(data, dict) else []
     found = []
@@ -91,6 +89,22 @@ def _deezer(artist: str, album: str, title: str) -> list[dict]:
             }
         )
     return found
+
+
+def _deezer(artist: str, album: str, title: str) -> list[dict]:
+    if _clean(album):
+        query = f'artist:"{_clean(artist)}" album:"{_clean(album)}"'
+        found = _deezer_query(
+            "https://api.deezer.com/search/album?" + urllib.parse.urlencode({"q": query, "limit": 8})
+        )
+        if found:
+            return found
+    query = _clean(f"{artist} {title}")
+    if not query.strip('" '):
+        return []
+    return _deezer_query(
+        "https://api.deezer.com/search?" + urllib.parse.urlencode({"q": query, "limit": 8})
+    )
 
 
 def _cover_art_archive(artist: str, album: str, title: str) -> list[dict]:
@@ -117,6 +131,29 @@ def _cover_art_archive(artist: str, album: str, title: str) -> list[dict]:
     return found
 
 
+def _genius_album_art(song_id, token: str, album: str) -> tuple[str, str] | None:
+    """Ask Genius for the album cover of a song; the search API has only song art."""
+    if not song_id or not _clean(album):
+        return None
+    try:
+        data = _get_json(
+            f"https://api.genius.com/songs/{song_id}",
+            {"Authorization": f"Bearer {token}"},
+        )
+    except Exception:
+        return None
+    song = (data.get("response") or {}).get("song") or {}
+    album_data = song.get("album") or {}
+    cover = album_data.get("cover_art_url")
+    name = _clean(str(album_data.get("name") or ""))
+    if not cover:
+        return None
+    requested = _norm(album)
+    if requested and name and requested not in _norm(name) and _norm(name) not in requested:
+        return None
+    return cover, name or _clean(album)
+
+
 def _genius(artist: str, album: str, title: str, token: str) -> list[dict]:
     if not token or not _clean(title):
         return []
@@ -125,17 +162,25 @@ def _genius(artist: str, album: str, title: str, token: str) -> list[dict]:
         {"Authorization": f"Bearer {token}"},
     )
     hits = data.get("response", {}).get("hits", []) if isinstance(data, dict) else []
+    hits = [hit for hit in hits if isinstance(hit, dict)][:6]
+    album_cover = None
+    if hits:
+        album_cover = _genius_album_art(hits[0].get("result", {}).get("id"), token, album)
+
     found = []
-    for hit in hits[:6]:
-        result = hit.get("result", {}) if isinstance(hit, dict) else {}
+    for index, hit in enumerate(hits):
+        result = hit.get("result", {})
         artwork = result.get("song_art_image_url") or result.get("header_image_url")
+        label = result.get("title") or ""
+        if index == 0 and album_cover:
+            artwork, label = album_cover
         if not artwork or "default" in artwork:
             continue
         found.append(
             {
                 "source": "Genius",
                 "url": artwork,
-                "label": result.get("title") or "",
+                "label": label,
                 "artist": (result.get("primary_artist") or {}).get("name", ""),
             }
         )

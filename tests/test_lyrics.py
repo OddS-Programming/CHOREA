@@ -40,6 +40,24 @@ def test_lookup_derives_plain_from_synced(monkeypatch) -> None:
     assert result["source"] == "lrclib"
 
 
+def test_lookup_falls_back_to_plain_lyrics(monkeypatch) -> None:
+    def fake_get(url: str, headers=None):
+        if "lrclib" in url:
+            raise RuntimeError("404")
+        if "lyrics.ovh" in url:
+            return {"lyrics": "When you were here before\nCouldn't look you in the eye"}
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(lyrics, "_get", fake_get)
+
+    result = lyrics.lookup("Radiohead", "Creep", "", 238)
+
+    assert result is not None
+    assert result["source"] == "lyrics.ovh"
+    assert result["synced"] is None
+    assert "here before" in result["plain"]
+
+
 def test_lookup_returns_none_when_offline(monkeypatch) -> None:
     def failing(url: str):
         raise RuntimeError("network down")

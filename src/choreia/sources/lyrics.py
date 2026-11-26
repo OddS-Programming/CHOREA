@@ -49,10 +49,17 @@ def _score(item: dict, artist: str, title: str, duration: float) -> int:
 
 
 def lookup(artist: str, title: str, album: str = "", duration: float = 0) -> dict | None:
-    """Find lyrics by exact match first, then by search with duration scoring."""
+    """Prefer synced lyrics from LRCLIB, then fall back to plain lyrics providers."""
     if not artist.strip() or not title.strip():
         return None
 
+    found = _lookup_lrclib(artist, title, album, duration)
+    if found:
+        return found
+    return _lookup_lyrics_ovh(artist, title)
+
+
+def _lookup_lrclib(artist: str, title: str, album: str, duration: float) -> dict | None:
     params = {"artist_name": artist, "track_name": title}
     if album.strip():
         params["album_name"] = album
@@ -88,3 +95,23 @@ def lookup(artist: str, title: str, album: str = "", duration: float = 0) -> dic
     if best is None:
         return None
     return _normalize(best[1])
+
+
+def _lookup_lyrics_ovh(artist: str, title: str) -> dict | None:
+    """Plain lyrics without timestamps, used only when LRCLIB has nothing."""
+    url = (
+        "https://api.lyrics.ovh/v1/"
+        + urllib.parse.quote(artist.strip())
+        + "/"
+        + urllib.parse.quote(title.strip())
+    )
+    try:
+        data = _get(url)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    text = str((data or {}).get("lyrics") or "").strip()
+    if not text:
+        return None
+    return {"source": "lyrics.ovh", "plain": text, "synced": None, "instrumental": False}

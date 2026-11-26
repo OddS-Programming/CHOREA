@@ -155,6 +155,127 @@ def test_check_token_requires_a_value() -> None:
     assert covers.check_token("   ") is False
 
 
+def test_genius_prefers_the_album_cover(monkeypatch) -> None:
+    def fake_json(url: str, headers=None):
+        if "/search?" in url:
+            return {
+                "response": {
+                    "hits": [
+                        {
+                            "result": {
+                                "id": 1,
+                                "title": "Creep",
+                                "song_art_image_url": "https://gen/song.jpg",
+                                "primary_artist": {"name": "Radiohead"},
+                            }
+                        },
+                        {
+                            "result": {
+                                "id": 2,
+                                "title": "Creep (Acoustic)",
+                                "song_art_image_url": "https://gen/song2.jpg",
+                                "primary_artist": {"name": "Radiohead"},
+                            }
+                        },
+                    ]
+                }
+            }
+        if "/songs/1" in url:
+            return {
+                "response": {
+                    "song": {
+                        "album": {"name": "Pablo Honey", "cover_art_url": "https://gen/album.jpg"}
+                    }
+                }
+            }
+        return {"response": {}}
+
+    monkeypatch.setattr(covers, "_get_json", fake_json)
+
+    found = covers._genius("Radiohead", "Pablo Honey", "Creep", "token")
+
+    assert found[0]["url"] == "https://gen/album.jpg"
+    assert found[0]["label"] == "Pablo Honey"
+    assert found[1]["url"] == "https://gen/song2.jpg"
+
+
+def test_genius_ignores_a_cover_of_another_album(monkeypatch) -> None:
+    def fake_json(url: str, headers=None):
+        if "/search?" in url:
+            return {
+                "response": {
+                    "hits": [
+                        {
+                            "result": {
+                                "id": 1,
+                                "title": "Creep",
+                                "song_art_image_url": "https://gen/song.jpg",
+                                "primary_artist": {"name": "Radiohead"},
+                            }
+                        }
+                    ]
+                }
+            }
+        if "/songs/1" in url:
+            return {
+                "response": {
+                    "song": {
+                        "album": {"name": "Kid A", "cover_art_url": "https://gen/kida.jpg"}
+                    }
+                }
+            }
+        return {"response": {}}
+
+    monkeypatch.setattr(covers, "_get_json", fake_json)
+
+    found = covers._genius("Radiohead", "Pablo Honey", "Creep", "token")
+
+    assert found[0]["url"] == "https://gen/song.jpg"
+
+
+def test_itunes_falls_back_to_a_song_search(monkeypatch) -> None:
+    calls = []
+
+    def fake_json(url: str, headers=None):
+        calls.append(url)
+        if "entity=album" in url:
+            return {"results": []}
+        return {
+            "results": [
+                {
+                    "trackName": "Creep",
+                    "collectionName": "Pablo Honey",
+                    "artistName": "Radiohead",
+                    "artworkUrl100": "https://img/100x100bb.jpg",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(covers, "_get_json", fake_json)
+
+    found = covers._itunes("Radiohead", "Unknown Album", "Creep")
+
+    assert found and found[0]["url"] == "https://img/1200x1200bb.jpg"
+    assert any("entity=song" in url for url in calls)
+
+
+def test_deezer_falls_back_to_a_track_search(monkeypatch) -> None:
+    calls = []
+
+    def fake_json(url: str, headers=None):
+        calls.append(url)
+        if "search/album" in url:
+            return {"data": []}
+        return {"data": [{"title": "Creep", "cover_xl": "https://dz/creep.jpg"}]}
+
+    monkeypatch.setattr(covers, "_get_json", fake_json)
+
+    found = covers._deezer("Radiohead", "Unknown Album", "Creep")
+
+    assert found and found[0]["url"] == "https://dz/creep.jpg"
+    assert any("api.deezer.com/search?" in url for url in calls)
+
+
 def test_prepare_resizes_large_art(monkeypatch) -> None:
     monkeypatch.setattr(covers, "_get", lambda url, headers=None: _jpeg((3000, 3000)))
 
