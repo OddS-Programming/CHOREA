@@ -21,6 +21,12 @@ const state = {
   followPauseUntil: 0,
   askResolve: null,
   askMode: "text",
+  collection: null,
+  folderStack: [],
+  selection: new Set(),
+  lastSelected: null,
+  editTracks: [],
+  editBaseline: {},
   loading: true,
 };
 
@@ -94,6 +100,11 @@ const el = {
   askInput: document.getElementById("ask-input"),
   askOk: document.getElementById("ask-ok"),
   askCancel: document.getElementById("ask-cancel"),
+  selectionBar: document.getElementById("selection-bar"),
+  selectionCount: document.getElementById("selection-count"),
+  selectionEdit: document.getElementById("selection-edit"),
+  selectionPlay: document.getElementById("selection-play"),
+  selectionClear: document.getElementById("selection-clear"),
   spectrum: document.getElementById("spectrum"),
   toast: document.getElementById("toast"),
   addFolder: document.getElementById("add-folder"),
@@ -160,10 +171,11 @@ function toast(message) {
 }
 
 /* ------------------------------------------------------------------- list */
-function rowMarkup(track) {
+function rowMarkup(track, selected = false) {
   const playing = track.id === state.currentId ? " playing" : "";
+  const chosen = selected ? " selected" : "";
   return `
-    <div class="row${playing}" data-id="${track.id}">
+    <div class="row${playing}${chosen}" data-id="${track.id}">
       <div class="row-cover">${coverMarkup(track)}</div>
       <div class="row-main">
         <div class="row-title">${escapeHtml(track.title || "Без названия")}</div>
@@ -258,7 +270,11 @@ function updatePlayingMark() {
 
 /* ----------------------------------------------------------------- player */
 function trackById(id) {
-  return state.tracks.find((track) => track.id === id) || null;
+  return (
+    state.tracks.find((track) => track.id === id) ||
+    (state.collection ? state.collection.tracks.find((track) => track.id === id) : null) ||
+    null
+  );
 }
 
 function setQueueFromList() {
@@ -473,11 +489,11 @@ async function renderFolders() {
       </div>
       <div class="row-album"></div>
       <div class="row-time">
-        <button class="row-open" data-open="${escapeHtml(folder.path)}" title="Открыть папку">
+        <button class="row-open" data-open="${escapeHtml(folder.path)}" title="Открыть папку в Проводнике">
           <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
         </button>
+        <button class="row-rescan" data-rescan="${escapeHtml(folder.path)}" title="Пересканировать">⟳</button>
         <button class="row-remove" data-remove="${folder.id}" title="Убрать папку из библиотеки">✕</button>
-        <span>⟳</span>
       </div>
     </div>`).join("")}</div>`;
 }
@@ -639,18 +655,147 @@ document.addEventListener("click", (event) => {
   if (!event.target.closest(".menu") && !event.target.closest(".row-add")) closeMenu();
 });
 
+/* ------------------------------------------------------- folders/albums */
+function folderRow(folder) {
+  return `<div class="row" data-subfolder="${escapeHtml(folder.path)}">
+    <div class="row-cover">▤</div>
+    <div class="row-main">
+      <div class="row-title">${escapeHtml(folder.name)}</div>
+      <div class="row-artist">${folder.tracks} треков</div>
+    </div>
+    <div class="row-album"></div>
+    <div class="row-time">›</div>
+  </div>`;
+}
+
+function renderCollection() {
+  const collection = state.collection;
+  if (!collection) return;
+  const counts = [];
+  if (collection.kind === "folder") counts.push(`${(collection.folders || []).length} папок`);
+  counts.push(`${collection.tracks.length} треков`);
+  const parts = [`<div class="playlist-toolbar">
+    ${collection.parent ? '<button class="ghost" id="collection-back">← Назад</button>' : ""}
+    <span class="hint">${counts.join(" · ")}</span>
+  </div>`, '<div class="scroll">'];
+  for (const folder of collection.folders || []) parts.push(folderRow(folder));
+  for (const track of collection.tracks) parts.push(rowMarkup(track, state.selection.has(track.id)));
+  if (!collection.tracks.length && !(collection.folders || []).length) {
+    parts.push('<div class="empty"><div><h2>Пусто</h2><p>Здесь нет проиндексированных треков.</p></div></div>');
+  }
+  parts.push("</div>");
+  el.view.innerHTML = parts.join("");
+  updateSelection();
+}
+
+async function openFolder(path, push = true) {
+  try {
+    const data = await API.get("browse", { path });
+    if (push) state.folderStack.push(data.path);
+    state.view = "folder";
+    state.collection = {
+      kind: "folder",
+      path: data.path,
+      folders: data.folders,
+      tracks: data.tracks,
+      parent: state.folderStack.length > 1,
+    };
+    state.selection = new Set();
+    state.lastSelected = null;
+    el.crumbs.textContent = data.path.split(/[\\/]/).filter(Boolean).pop() || data.path;
+    renderCollection();
+  } catch (error) {
+    toast(`Не удалось открыть папку: ${error.message}`);
+  }
+}
+
+async function folderBack() {
+  state.folderStack.pop();
+  const path = state.folderStack[state.folderStack.length - 1];
+  if (path) await openFolder(path, false);
+  else switchView("folders");
+}
+
+async function renderAlbums() {
+  el.crumbs.textContent = "Альбомы";
+  let albums = [];
+  try {
+    albums = (await API.get("albums")).albums;
+  } catch (error) {
+    toast(`Не удалось загрузить альбомы: ${error.message}`);
+  }
+  if (!albums.length) {
+    el.view.innerHTML = '<div class="empty"><div><h2>Альбомов нет</h2><p>У треков не заполнен тег «Альбом».</p></div></div>';
+    return;
+  }
+  el.view.innerHTML = `<div class="album-grid">${albums.map((album) => `
+    <button class="album-card" data-album="${escapeHtml(album.album)}" data-artist="${escapeHtml(album.album_artist || "")}">
+      <div class="album-cover">${album.cover_hash
+        ? `<img loading="lazy" src="${API.thumb(album.cover_hash, 320)}" alt="">`
+        : '<span class="vinyl"></span>'}</div>
+      <div class="album-name">${escapeHtml(album.album)}</div>
+      <div class="album-artist">${escapeHtml(album.album_artist || "—")} · ${album.tracks}</div>
+    </button>`).join("")}</div>`;
+}
+
+async function openAlbum(album, artist) {
+  try {
+    const data = await API.get("albums/tracks", { album, artist });
+    state.view = "album";
+    state.collection = { kind: "album", album, artist, tracks: data.tracks, parent: false };
+    state.selection = new Set();
+    state.lastSelected = null;
+    el.crumbs.textContent = album;
+    renderCollection();
+  } catch (error) {
+    toast(`Не удалось открыть альбом: ${error.message}`);
+  }
+}
+
+/* -------------------------------------------------------------- selection */
+function selectTrack(id, event) {
+  const ids = (state.collection?.tracks || []).map((track) => track.id);
+  if (event.shiftKey && state.lastSelected !== null) {
+    const from = ids.indexOf(state.lastSelected);
+    const to = ids.indexOf(id);
+    if (from >= 0 && to >= 0) {
+      const [low, high] = [Math.min(from, to), Math.max(from, to)];
+      for (let index = low; index <= high; index += 1) state.selection.add(ids[index]);
+    }
+  } else if (event.ctrlKey) {
+    if (state.selection.has(id)) state.selection.delete(id);
+    else state.selection.add(id);
+  } else {
+    state.selection = new Set([id]);
+  }
+  state.lastSelected = id;
+  updateSelection();
+}
+
+function updateSelection() {
+  el.selectionBar.hidden = state.selection.size === 0;
+  el.selectionCount.textContent = `Выбрано ${state.selection.size}`;
+  document.querySelectorAll(".row[data-id]").forEach((row) => {
+    row.classList.toggle("selected", state.selection.has(Number(row.dataset.id)));
+  });
+}
+
 function renderPlaceholder(title, text) {
   el.view.innerHTML = `<div class="empty"><div><h2>${title}</h2><p>${text}</p></div></div>`;
 }
 
 function switchView(view) {
   state.view = view;
+  state.selection = new Set();
+  state.lastSelected = null;
+  el.selectionBar.hidden = true;
   el.nav.querySelectorAll(".nav-item").forEach((item) => {
     item.classList.toggle("active", item.dataset.view === view);
   });
-  const titles = { library: "Библиотека", folders: "Папки", playlists: "Плейлисты", online: "Интернет" };
+  const titles = { library: "Библиотека", albums: "Альбомы", folders: "Папки", playlists: "Плейлисты", online: "Интернет" };
   el.crumbs.textContent = titles[view] || "";
   if (view === "library") renderLibrary();
+  if (view === "albums") renderAlbums();
   if (view === "folders") renderFolders();
   if (view === "playlists") renderPlaylists();
   if (view === "online") renderPlaceholder("Интернет", "Поиск и скачивание с hitmos.fm появятся на этапе 5.");
@@ -723,24 +868,43 @@ function fieldValue(track, key) {
   return track[key] ?? "";
 }
 
+function commonValue(tracks, key) {
+  const values = new Set(tracks.map((track) => String(fieldValue(track, key))));
+  return values.size === 1 ? [...values][0] : null;
+}
+
 function openEditor(trackId) {
-  const track = trackById(Number(trackId));
-  if (!track) {
+  openEditorFor([Number(trackId)]);
+}
+
+function openEditorFor(ids) {
+  const tracks = ids.map((id) => trackById(Number(id))).filter(Boolean);
+  if (!tracks.length) {
     toast("Сначала выберите трек");
     return;
   }
-  state.editing = track;
+  const single = tracks.length === 1;
+  state.editTracks = tracks;
+  state.editing = tracks[0];
+  state.editBaseline = {};
   state.editCover = { action: "keep", dataUrl: null };
-  el.editFile.textContent = track.path;
+  el.editFile.textContent = single ? tracks[0].path : `Выбрано треков: ${tracks.length}`;
+  el.editMultiHint.hidden = single;
   el.editCoverFile.value = "";
   el.editCoverAlbum.checked = false;
-  setEditCoverPreview(track.cover_hash ? API.thumb(track.cover_hash, 320) : "");
-  el.editCoverHint.textContent = track.cover_hash ? "Текущая обложка" : "JPG или PNG, квадрат от 1000×1000";
-  el.editFields.innerHTML = EDIT_FIELDS.map(([key, label]) => `
-    <div class="field">
-      <label for="edit-${key}">${label}</label>
-      <input id="edit-${key}" data-key="${key}" value="${escapeHtml(fieldValue(track, key))}">
-    </div>`).join("");
+  el.editCoverAlbum.closest("label").hidden = !single;
+  const preview = tracks.find((track) => track.cover_hash);
+  setEditCoverPreview(preview ? API.thumb(preview.cover_hash, 320) : "");
+  el.editCoverHint.textContent = preview ? "Текущая обложка" : "JPG или PNG, квадрат от 1000×1000";
+  el.editFields.innerHTML = EDIT_FIELDS.map(([key, label]) => {
+    const value = commonValue(tracks, key);
+    state.editBaseline[key] = value;
+    return `
+      <div class="field">
+        <label for="edit-${key}">${label}</label>
+        <input id="edit-${key}" data-key="${key}" value="${escapeHtml(value ?? "")}">
+      </div>`;
+  }).join("");
   el.editModal.hidden = false;
   requestAnimationFrame(() => el.editFields.querySelector("input")?.focus());
 }
@@ -752,36 +916,55 @@ function setEditCoverPreview(url) {
 function closeEditor() {
   el.editModal.hidden = true;
   state.editing = null;
+  state.editTracks = [];
+  state.editBaseline = {};
   state.editCover = { action: "keep", dataUrl: null };
 }
 
 async function saveEditor(event) {
   event.preventDefault();
-  if (!state.editing) return;
+  const tracks = state.editTracks || [];
+  if (!tracks.length) return;
+  const multi = tracks.length > 1;
   const payload = {};
   el.editFields.querySelectorAll("input").forEach((input) => {
-    payload[input.dataset.key] = input.value;
+    const key = input.dataset.key;
+    const value = input.value;
+    if (!multi) {
+      payload[key] = value;
+      return;
+    }
+    const baseline = state.editBaseline[key];
+    if ((baseline === null ? "" : baseline) !== value) payload[key] = value;
   });
+  if (multi && !Object.keys(payload).length && state.editCover.action === "keep") {
+    toast("Ничего не изменено");
+    return;
+  }
   payload.cover_action = state.editCover.action;
-  payload.apply_to_album = state.editCover.action === "set" && el.editCoverAlbum.checked;
+  if (!multi) payload.apply_to_album = state.editCover.action === "set" && el.editCoverAlbum.checked;
   if (state.editCover.action === "set" && state.editCover.dataUrl) {
     payload.cover = state.editCover.dataUrl;
   }
+
   el.editSave.disabled = true;
   el.editSave.textContent = "Сохраняю…";
+  let done = 0;
+  let albumUpdated = 0;
   try {
-    const response = await API.post(`tracks/${state.editing.id}`, payload);
-    const updated = response.track;
-    const index = state.tracks.findIndex((item) => item.id === updated.id);
-    if (index >= 0) state.tracks[index] = updated;
-    if (state.currentId === updated.id) updateNow(updated);
+    for (const track of tracks) {
+      const response = await API.post(`tracks/${track.id}`, payload);
+      albumUpdated += response.album_updated || 0;
+      done += 1;
+    }
     closeEditor();
-    renderLibrary();
-    syncTransport();
+    await refreshAfterEdit();
     toast(
-      response.album_updated
-        ? `Обложка записана во весь альбом, файлов: ${response.album_updated + 1}`
-        : "Метаданные записаны, файл сохранён"
+      done > 1
+        ? `Записано треков: ${done}`
+        : albumUpdated
+          ? `Обложка записана во весь альбом, файлов: ${albumUpdated + 1}`
+          : "Метаданные записаны, файл сохранён"
     );
   } catch (error) {
     toast(`Не удалось сохранить: ${error.message}`);
@@ -789,6 +972,16 @@ async function saveEditor(event) {
     el.editSave.disabled = false;
     el.editSave.textContent = "Сохранить";
   }
+}
+
+async function refreshAfterEdit() {
+  await loadTracks();
+  if (state.view === "folder" && state.collection?.path) {
+    await openFolder(state.collection.path, false);
+  } else if (state.view === "album" && state.collection?.album) {
+    await openAlbum(state.collection.album, state.collection.artist);
+  }
+  syncTransport();
 }
 
 /* ---------------------------------------------------------------- lyrics */
@@ -942,6 +1135,27 @@ el.view.addEventListener("click", async (event) => {
     openPlaylist(Number(playlistRow.dataset.playlist));
     return;
   }
+  if (event.target.id === "collection-back") {
+    await folderBack();
+    return;
+  }
+  const subfolder = event.target.closest("[data-subfolder]");
+  if (subfolder) {
+    event.stopPropagation();
+    await openFolder(subfolder.dataset.subfolder);
+    return;
+  }
+  const albumCard = event.target.closest(".album-card");
+  if (albumCard) {
+    await openAlbum(albumCard.dataset.album, albumCard.dataset.artist);
+    return;
+  }
+  const rescan = event.target.closest("[data-rescan]");
+  if (rescan) {
+    event.stopPropagation();
+    API.post("scan", { path: rescan.dataset.rescan }).then(pollScan).catch(() => {});
+    return;
+  }
   const open = event.target.closest(".row-open");
   if (open) {
     event.stopPropagation();
@@ -960,10 +1174,16 @@ el.view.addEventListener("click", async (event) => {
     openEditor(Number(edit.dataset.edit));
     return;
   }
+  const collectionRow = event.target.closest(".row[data-id]");
+  if (collectionRow && (state.view === "folder" || state.view === "album")) {
+    selectTrack(Number(collectionRow.dataset.id), event);
+    return;
+  }
   const row = event.target.closest(".row");
   if (!row) return;
   if (row.dataset.folder) {
-    API.post("scan", { path: row.dataset.folder }).then(pollScan).catch(() => {});
+    state.folderStack = [];
+    await openFolder(row.dataset.folder);
     return;
   }
   if (row.dataset.id) playTrack(Number(row.dataset.id));
@@ -1098,6 +1318,20 @@ el.askInput.addEventListener("keydown", (event) => {
 });
 el.askModal.addEventListener("click", (event) => {
   if (event.target === el.askModal) closeAsk(state.askMode === "text" ? null : false);
+});
+
+el.selectionEdit.addEventListener("click", () => openEditorFor([...state.selection]));
+el.selectionPlay.addEventListener("click", () => {
+  const ids = [...state.selection];
+  if (!ids.length) return;
+  state.queue = ids;
+  state.queueIndex = 0;
+  playTrack(ids[0]);
+});
+el.selectionClear.addEventListener("click", () => {
+  state.selection = new Set();
+  state.lastSelected = null;
+  updateSelection();
 });
 
 el.npLyricsEdit.addEventListener("click", openLyricsEditor);

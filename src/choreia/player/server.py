@@ -460,6 +460,32 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api(self, route: str, query: dict[str, list[str]]) -> None:
         library = self.context.library
+        if route == "browse":
+            import os
+
+            directory = (query.get("path") or [""])[0]
+            if not directory:
+                self._error(400, "path required")
+                return
+            normalized = os.path.normpath(directory)
+            roots = [os.path.normpath(folder["path"]) for folder in library.folders()]
+            lowered = normalized.lower()
+            inside = any(
+                lowered == root.lower() or lowered.startswith(root.lower() + "\\") for root in roots
+            )
+            if not inside:
+                self._error(403, "outside the library")
+                return
+            self._json(library.browse(normalized))
+            return
+        if route == "albums":
+            self._json({"albums": library.albums()})
+            return
+        if route == "albums/tracks":
+            album = (query.get("album") or [""])[0]
+            artist = (query.get("artist") or [""])[0]
+            self._json({"tracks": library.album_tracks(album, artist)})
+            return
         if route == "playlists":
             self._json({"playlists": library.playlists()})
             return

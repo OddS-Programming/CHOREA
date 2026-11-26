@@ -221,6 +221,37 @@ class Library:
             )
             self._conn.commit()
 
+    def browse(self, directory: str) -> dict:
+        """List immediate subfolders and the tracks that sit directly in `directory`."""
+        import os
+
+        directory = os.path.normpath(directory)
+        prefix = directory.rstrip("\\/") + "\\"
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM tracks WHERE path LIKE ? ORDER BY path COLLATE NOCASE",
+                (prefix + "%",),
+            ).fetchall()
+
+        folders: dict[str, int] = {}
+        tracks: list[dict] = []
+        for row in rows:
+            rest = str(row["path"])[len(prefix):]
+            if "\\" in rest or "/" in rest:
+                name = rest.replace("/", "\\").split("\\", 1)[0]
+                folders[name] = folders.get(name, 0) + 1
+            else:
+                tracks.append(dict(row))
+
+        return {
+            "path": directory,
+            "folders": [
+                {"name": name, "path": prefix + name, "tracks": count}
+                for name, count in sorted(folders.items(), key=lambda item: item[0].lower())
+            ],
+            "tracks": tracks,
+        }
+
     def album_tracks(self, album: str, album_artist: str = "") -> list[dict]:
         if not album.strip():
             return []
@@ -229,8 +260,20 @@ class Library:
         if album_artist.strip():
             sql += " AND album_artist = ? COLLATE NOCASE"
             params.append(album_artist)
+        sql += " ORDER BY disc_no, track_no, title COLLATE NOCASE"
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def albums(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT album, album_artist, COUNT(*) AS tracks, "
+                "MIN(NULLIF(cover_hash, '')) AS cover_hash "
+                "FROM tracks WHERE album != '' "
+                "GROUP BY album COLLATE NOCASE, album_artist COLLATE NOCASE "
+                "ORDER BY album COLLATE NOCASE"
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def tracks_under(self, folder_path: str) -> Iterable[dict]:

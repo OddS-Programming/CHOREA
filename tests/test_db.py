@@ -104,6 +104,22 @@ def test_playlists(tmp_path: Path) -> None:
     library.close()
 
 
+def test_albums_group_tracks(tmp_path: Path, asset) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(path="C:/m/1.mp3", title="One", album="Same", album_artist="Artist", cover_hash="abc")
+    library.upsert_track(path="C:/m/2.mp3", title="Two", album="Same", album_artist="Artist", cover_hash="")
+    library.upsert_track(path="C:/m/3.mp3", title="Three", album="Other", album_artist="Artist")
+
+    albums = library.albums()
+
+    assert [item["album"] for item in albums] == ["Other", "Same"]
+    same = albums[1]
+    assert same["tracks"] == 2
+    assert same["cover_hash"] == "abc"
+    assert [track["title"] for track in library.album_tracks("Same", "Artist")] == ["One", "Two"]
+    library.close()
+
+
 def test_delete_tracks_by_path(tmp_path: Path) -> None:
     library = _library(tmp_path)
     library.upsert_track(path="C:/m/1.mp3", title="One")

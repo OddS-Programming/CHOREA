@@ -18,6 +18,9 @@
       <button class="nav-item active" data-view="library">
         <span class="nav-icon">≡</span><span>Библиотека</span>
       </button>
+      <button class="nav-item" data-view="albums">
+        <span class="nav-icon">▦</span><span>Альбомы</span>
+      </button>
       <button class="nav-item" data-view="folders">
         <span class="nav-icon">▤</span><span>Папки</span>
       </button>
@@ -53,6 +56,13 @@
 
     <section class="view" id="view"></section>
   </main>
+</div>
+
+<div class="selection-bar" id="selection-bar" hidden>
+  <span id="selection-count">Выбрано 0</span>
+  <button class="ghost" id="selection-edit">Изменить</button>
+  <button class="ghost" id="selection-play">Играть</button>
+  <button class="ghost" id="selection-clear">Снять</button>
 </div>
 
 <footer class="player" id="player">
@@ -141,6 +151,7 @@
       <input type="file" id="edit-cover-file" accept="image/*" hidden>
     </div>
     <div class="modal-grid" id="edit-fields"></div>
+    <div class="hint" id="edit-multi-hint" hidden>Пустые поля означают разные значения — заполните только то, что нужно изменить.</div>
     <div class="modal-actions">
       <button type="button" class="ghost" id="edit-cancel">Отмена</button>
       <button type="submit" class="play-btn modal-save" id="edit-save">Сохранить</button>

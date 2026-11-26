@@ -70,6 +70,26 @@ def test_remove_folder_forgets_its_tracks_but_keeps_files(tmp_path: Path, asset)
     library.close()
 
 
+def test_browse_lists_subfolders_and_tracks(tmp_path: Path, asset) -> None:
+    folder = tmp_path / "Artist"
+    album = folder / "Album"
+    album.mkdir(parents=True)
+    helpers.copy_asset("mp3", folder / "single.mp3")
+    helpers.copy_asset("mp3", album / "track.mp3")
+
+    library, scanner = _setup(tmp_path)
+    scanner.scan_folder(folder)
+
+    listing = library.browse(str(folder))
+
+    assert [item["name"] for item in listing["folders"]] == ["Album"]
+    assert listing["folders"][0]["tracks"] == 1
+    assert [Path(track["path"]).name for track in listing["tracks"]] == ["single.mp3"]
+    nested = library.browse(str(album))
+    assert [Path(track["path"]).name for track in nested["tracks"]] == ["track.mp3"]
+    library.close()
+
+
 def test_scan_removes_deleted_files(tmp_path: Path, asset) -> None:
     folder = tmp_path / "Album"
     folder.mkdir()
