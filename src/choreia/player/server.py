@@ -13,8 +13,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..library.db import Library
-from ..library.scanner import Scanner
+from ..library.scanner import Scanner, refresh_track
 from ..library.thumbs import ThumbCache
+from ..core import clean_file, inspect_file
 
 AUDIO_TYPES = {
     ".mp3": "audio/mpeg",
@@ -236,6 +237,12 @@ class Handler(BaseHTTPRequestHandler):
             self._error(403, "token required")
             return
         path = unquote(urlparse(self.path).path)
+
+        track_match = re.match(r"^/api/tracks/(\d+)$", path)
+        if track_match:
+            self._update_track(int(track_match.group(1)))
+            return
+
         if path == "/api/folders":
             payload = self._read_json()
             folder = Path(payload.get("path", ""))
@@ -272,12 +279,38 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlparse(self.path).path)
         match = re.match(r"^/api/folders/(\d+)$", path)
         if match:
-            self.context.library.remove_folder(int(match.group(1)))
-            self._json({"ok": True})
+            removed = self.context.library.remove_folder(int(match.group(1)))
+            self._json({"ok": True, "removed": removed})
             return
         self._error(404, "not found")
 
     # ----------------------------------------------------------------- parts
+    def _update_track(self, track_id: int) -> None:
+        from pathlib import Path
+
+        library = self.context.library
+        track = library.track(track_id)
+        if track is None:
+            self._error(404, "no track")
+            return
+        source = Path(track["path"])
+        if not source.exists():
+            self._error(404, "file missing")
+            return
+        payload = self._read_json()
+        current = inspect_file(source)
+        names = ("title", "artist", "album", "album_artist", "track", "disc", "year", "genre")
+        metadata = {
+            name: str(payload.get(name, current.fields.get(name, ""))) for name in names
+        }
+        try:
+            clean_file(source, keep=current.front_cover, metadata=metadata)
+            updated = refresh_track(library, self.context.thumbs, source)
+        except Exception as exc:
+            self._error(500, f"cannot write: {exc}")
+            return
+        self._json({"track": updated})
+
     def _api(self, route: str, query: dict[str, list[str]]) -> None:
         library = self.context.library
         if route == "tracks":

@@ -43,6 +43,21 @@ def _get(server, path: str, headers: dict | None = None):
         return exc.code, exc.headers, exc.read()
 
 
+def _post(server, path: str, payload: dict) -> tuple[int, dict]:
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{server.port}{path}",
+        data=data,
+        headers={"Content-Type": "application/json", "X-Token": server.context.token},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:
+            return response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read() or b"{}")
+
+
 def test_api_rejects_missing_token(server) -> None:
     running, _library, _track = server
     status, _headers, _body = _get(running, "/api/tracks")
@@ -100,6 +115,49 @@ def test_static_traversal_is_blocked(server) -> None:
     response.read()
     assert response.status in (403, 404)
     connection.close()
+
+
+def test_folder_can_be_added_and_removed(server, tmp_path) -> None:
+    running, _library, _track = server
+    status, payload = _post(running, "/api/folders", {"path": str(tmp_path / "Album")})
+    assert status == 200
+    folder_id = payload["id"]
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{running.port}/api/folders/{folder_id}",
+        headers={"X-Token": running.context.token},
+        method="DELETE",
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        assert response.status == 200
+
+    status, _headers, body = _get(running, "/api/folders", {"X-Token": running.context.token})
+    assert status == 200
+    assert json.loads(body)["folders"] == []
+
+
+def test_update_track_metadata(server) -> None:
+    from choreia.core import inspect_file
+
+    running, _library, track = server
+    status, payload = _post(
+        running,
+        "/api/tracks/1",
+        {"title": "Новое имя", "artist": "Ёж", "album": "Альбом"},
+    )
+
+    assert status == 200
+    assert payload["track"]["title"] == "Новое имя"
+    assert payload["track"]["artist"] == "Ёж"
+    written = inspect_file(track)
+    assert written.fields["title"] == "Новое имя"
+    assert written.fields["artist"] == "Ёж"
+
+
+def test_update_unknown_track(server) -> None:
+    running, _library, _track = server
+    status, _payload = _post(running, "/api/tracks/999", {"title": "x"})
+    assert status == 404
 
 
 def test_unknown_track_is_404(server) -> None:

@@ -250,10 +250,18 @@ class Library:
             rows = self._conn.execute("SELECT * FROM folders ORDER BY path COLLATE NOCASE").fetchall()
         return [dict(row) for row in rows]
 
-    def remove_folder(self, folder_id: int) -> None:
+    def remove_folder(self, folder_id: int) -> int:
+        """Forget a folder and every track under it. Files on disk are untouched."""
         with self._lock:
+            row = self._conn.execute("SELECT path FROM folders WHERE id=?", (folder_id,)).fetchone()
+            if row is None:
+                return 0
+            prefix = str(row["path"]).rstrip("\\/") + "\\"
+            cursor = self._conn.execute("DELETE FROM tracks WHERE path LIKE ?", (prefix + "%",))
+            removed = cursor.rowcount
             self._conn.execute("DELETE FROM folders WHERE id=?", (folder_id,))
             self._conn.commit()
+        return removed
 
     # -------------------------------------------------------------- settings
     def setting(self, key: str, default: str | None = None) -> str | None:

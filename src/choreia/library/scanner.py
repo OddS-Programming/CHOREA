@@ -48,6 +48,38 @@ def _number(value: str) -> int | None:
         return None
 
 
+def refresh_track(library: Library, thumbs: ThumbCache, path: Path | str) -> dict | None:
+    """Re-read one file after an edit and update its row in the index."""
+    path = Path(path)
+    report = inspect_file(path)
+    existing = library.track_by_path(str(path))
+    cover = report.front_cover
+    cover_hash = thumbs.store(cover.data) if cover is not None else ""
+    stat = path.stat()
+    fields = report.fields
+    library.upsert_track(
+        path=str(path),
+        folder_id=existing["folder_id"] if existing else None,
+        title=fields.get("title") or path.stem,
+        artist=fields.get("artist", ""),
+        album=fields.get("album", ""),
+        album_artist=fields.get("album_artist", ""),
+        track_no=_number(fields.get("track", "")),
+        disc_no=_number(fields.get("disc", "")),
+        year=fields.get("year", ""),
+        genre=fields.get("genre", ""),
+        duration=report.audio.get("duration", 0) or 0,
+        bitrate=report.audio.get("bitrate", 0) or 0,
+        sample_rate=report.audio.get("sample_rate", 0) or 0,
+        channels=report.audio.get("channels", 0) or 0,
+        size=stat.st_size,
+        mtime=stat.st_mtime,
+        cover_hash=cover_hash,
+        added_at=time.time(),
+    )
+    return library.track_by_path(str(path))
+
+
 class Scanner:
     def __init__(
         self,

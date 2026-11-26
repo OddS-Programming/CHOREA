@@ -51,6 +51,25 @@ def test_rescan_is_incremental(tmp_path: Path, asset) -> None:
     library.close()
 
 
+def test_remove_folder_forgets_its_tracks_but_keeps_files(tmp_path: Path, asset) -> None:
+    folder = tmp_path / "Album"
+    folder.mkdir()
+    first = helpers.copy_asset("mp3", folder / "01.mp3")
+    helpers.copy_asset("flac", folder / "02.flac")
+
+    library, scanner = _setup(tmp_path)
+    scanner.scan_folder(folder)
+    folder_id = library.folders()[0]["id"]
+
+    removed = library.remove_folder(folder_id)
+
+    assert removed == 2
+    assert library.count_tracks() == 0
+    assert library.folders() == []
+    assert first.exists()
+    library.close()
+
+
 def test_scan_removes_deleted_files(tmp_path: Path, asset) -> None:
     folder = tmp_path / "Album"
     folder.mkdir()

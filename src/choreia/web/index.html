@@ -61,6 +61,7 @@
       <div class="now-title" id="now-title">Ничего не играет</div>
       <div class="now-artist" id="now-artist"></div>
     </div>
+    <button class="icon-btn now-edit" id="edit-current" title="Метаданные">✎</button>
   </div>
 
   <div class="controls">
@@ -94,9 +95,42 @@
       <div class="np-artist" id="np-artist"></div>
       <div class="np-album" id="np-album"></div>
     </div>
+
+    <div class="np-controls">
+      <button class="icon-btn" id="np-shuffle" title="Перемешать">⤨</button>
+      <button class="icon-btn" id="np-prev" title="Предыдущий">⏮</button>
+      <button class="play-btn" id="np-play" title="Играть">▶</button>
+      <button class="icon-btn" id="np-next" title="Следующий">⏭</button>
+      <button class="icon-btn" id="np-repeat" title="Повтор">↻</button>
+    </div>
+
+    <div class="np-seek-row">
+      <span class="time" id="np-elapsed">0:00</span>
+      <input class="seek" id="np-seek" type="range" min="0" max="1000" value="0" step="1">
+      <span class="time" id="np-duration">0:00</span>
+    </div>
+
+    <div class="np-actions">
+      <button class="ghost" id="np-edit">Изменить метаданные</button>
+    </div>
     <canvas class="np-spectrum" id="spectrum" width="520" height="120"></canvas>
     <div class="np-lyrics" id="np-lyrics">Текст появится здесь</div>
   </div>
+</div>
+
+<div class="modal" id="edit-modal" hidden>
+  <form class="modal-card" id="edit-form">
+    <div class="modal-head">
+      <div class="modal-title">Метаданные</div>
+      <button type="button" class="icon-btn" id="edit-close" title="Закрыть">✕</button>
+    </div>
+    <div class="modal-file" id="edit-file"></div>
+    <div class="modal-grid" id="edit-fields"></div>
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="edit-cancel">Отмена</button>
+      <button type="submit" class="play-btn modal-save" id="edit-save">Сохранить</button>
+    </div>
+  </form>
 </div>
 
 <div class="toast" id="toast" hidden></div>

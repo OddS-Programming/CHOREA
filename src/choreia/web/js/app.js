@@ -13,6 +13,7 @@ const state = {
   repeat: "off",
   folders: [],
   scanTimer: null,
+  editing: null,
 };
 
 const el = {
@@ -43,6 +44,23 @@ const el = {
   npArtist: document.getElementById("np-artist"),
   npAlbum: document.getElementById("np-album"),
   npClose: document.getElementById("np-close"),
+  npPlay: document.getElementById("np-play"),
+  npPrev: document.getElementById("np-prev"),
+  npNext: document.getElementById("np-next"),
+  npShuffle: document.getElementById("np-shuffle"),
+  npRepeat: document.getElementById("np-repeat"),
+  npSeek: document.getElementById("np-seek"),
+  npElapsed: document.getElementById("np-elapsed"),
+  npDuration: document.getElementById("np-duration"),
+  npEdit: document.getElementById("np-edit"),
+  editCurrent: document.getElementById("edit-current"),
+  editModal: document.getElementById("edit-modal"),
+  editForm: document.getElementById("edit-form"),
+  editFields: document.getElementById("edit-fields"),
+  editFile: document.getElementById("edit-file"),
+  editClose: document.getElementById("edit-close"),
+  editCancel: document.getElementById("edit-cancel"),
+  editSave: document.getElementById("edit-save"),
   spectrum: document.getElementById("spectrum"),
   toast: document.getElementById("toast"),
   addFolder: document.getElementById("add-folder"),
@@ -94,7 +112,10 @@ function rowMarkup(track) {
         <div class="row-artist">${escapeHtml(track.artist || "Неизвестный")}</div>
       </div>
       <div class="row-album">${escapeHtml(track.album || "")}</div>
-      <div class="row-time">${formatTime(track.duration)}</div>
+      <div class="row-time">
+        <button class="row-edit" data-edit="${track.id}" title="Изменить метаданные">✎</button>
+        <span>${formatTime(track.duration)}</span>
+      </div>
     </div>`;
 }
 
@@ -189,11 +210,11 @@ function playTrack(id) {
 function updateNow(track) {
   el.nowTitle.textContent = track.title || "Без названия";
   el.nowArtist.textContent = track.artist || "";
-  el.nowCover.innerHTML = coverMarkup(track, 320);
   el.npTitle.textContent = track.title || "";
   el.npArtist.textContent = track.artist || "";
   el.npAlbum.textContent = track.album || "";
-  el.npCover.innerHTML = coverMarkup(track, 640);
+  setCover(el.nowCover, track, 320);
+  setCover(el.npCover, track, 640);
   if (track.cover_hash) {
     el.npBackdrop.style.backgroundImage = `url("${API.thumb(track.cover_hash, 320)}")`;
     requestAnimationFrame(() => el.npBackdrop.classList.add("ready"));
@@ -202,6 +223,7 @@ function updateNow(track) {
     el.npBackdrop.classList.remove("ready");
   }
   document.title = `${track.title || "χορεία"} — χορεία`;
+  syncTransport();
   if ("mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: track.title || "",
@@ -210,6 +232,16 @@ function updateNow(track) {
       artwork: track.cover_hash ? [{ src: API.thumb(track.cover_hash, 640), sizes: "640x640", type: "image/jpeg" }] : [],
     });
   }
+}
+
+function setCover(container, track, size) {
+  container.innerHTML = coverMarkup(track, size);
+  const image = container.querySelector("img");
+  if (!image) return;
+  image.classList.add("cover-fade");
+  const show = () => image.classList.add("cover-in");
+  if (image.complete && image.naturalWidth) show();
+  else image.addEventListener("load", show, { once: true });
 }
 
 function nextTrack(step = 1) {
@@ -249,18 +281,46 @@ function togglePlay() {
 }
 
 function syncPlayIcon() {
-  el.play.textContent = el.audio.paused ? "▶" : "❚❚";
+  syncTransport();
+}
+
+function syncTransport() {
+  const playing = !el.audio.paused && Boolean(state.currentId);
+  const icon = playing ? "❚❚" : "▶";
+  el.play.textContent = icon;
+  el.npPlay.textContent = icon;
+
+  for (const button of [el.shuffle, el.npShuffle]) button.classList.toggle("on", state.shuffle);
+  for (const button of [el.repeat, el.npRepeat]) {
+    button.classList.toggle("on", state.repeat !== "off");
+    button.textContent = state.repeat === "one" ? "↻¹" : "↻";
+  }
+
+  const duration = el.audio.duration || 0;
+  const ratio = duration ? el.audio.currentTime / duration : 0;
+  const pairs = [
+    [el.seek, el.elapsed, el.duration],
+    [el.npSeek, el.npElapsed, el.npDuration],
+  ];
+  for (const [seek, elapsed, total] of pairs) {
+    seek.value = String(Math.round(ratio * 1000));
+    seek.style.background = `linear-gradient(90deg, var(--accent) ${ratio * 100}%, var(--surface-3) 0)`;
+    elapsed.textContent = formatTime(el.audio.currentTime);
+    total.textContent = formatTime(duration);
+  }
 }
 
 /* ------------------------------------------------------------- now playing */
 function openNowPlaying() {
   if (!state.currentId) return;
   el.nowplaying.hidden = false;
+  document.body.classList.add("np-open");
   startSpectrum();
 }
 
 function closeNowPlaying() {
   el.nowplaying.hidden = true;
+  document.body.classList.remove("np-open");
   stopSpectrum();
 }
 
@@ -331,8 +391,23 @@ async function renderFolders() {
         <div class="row-artist">${escapeHtml(folder.path)}</div>
       </div>
       <div class="row-album"></div>
-      <div class="row-time">⟳</div>
+      <div class="row-time">
+        <button class="row-remove" data-remove="${folder.id}" title="Убрать папку из библиотеки">✕</button>
+        <span>⟳</span>
+      </div>
     </div>`).join("")}</div>`;
+}
+
+async function removeFolder(folderId) {
+  if (!window.confirm("Убрать папку из библиотеки? Файлы на диске останутся.")) return;
+  try {
+    await API.del(`folders/${folderId}`);
+    toast("Папка убрана из библиотеки");
+    await loadTracks();
+    renderFolders();
+  } catch (error) {
+    toast(`Не удалось убрать папку: ${error.message}`);
+  }
 }
 
 function renderPlaceholder(title, text) {
@@ -397,8 +472,87 @@ function pollScan() {
   }, 700);
 }
 
+/* ---------------------------------------------------------------- editor */
+const EDIT_FIELDS = [
+  ["title", "Название"],
+  ["artist", "Исполнитель"],
+  ["album", "Альбом"],
+  ["album_artist", "Исполнитель альбома"],
+  ["track", "Трек"],
+  ["disc", "Диск"],
+  ["year", "Год"],
+  ["genre", "Жанр"],
+];
+
+function fieldValue(track, key) {
+  if (key === "track") return track.track_no ?? "";
+  if (key === "disc") return track.disc_no ?? "";
+  return track[key] ?? "";
+}
+
+function openEditor(trackId) {
+  const track = trackById(Number(trackId));
+  if (!track) {
+    toast("Сначала выберите трек");
+    return;
+  }
+  state.editing = track;
+  el.editFile.textContent = track.path;
+  el.editFields.innerHTML = EDIT_FIELDS.map(([key, label]) => `
+    <div class="field">
+      <label for="edit-${key}">${label}</label>
+      <input id="edit-${key}" data-key="${key}" value="${escapeHtml(fieldValue(track, key))}">
+    </div>`).join("");
+  el.editModal.hidden = false;
+  requestAnimationFrame(() => el.editFields.querySelector("input")?.focus());
+}
+
+function closeEditor() {
+  el.editModal.hidden = true;
+  state.editing = null;
+}
+
+async function saveEditor(event) {
+  event.preventDefault();
+  if (!state.editing) return;
+  const payload = {};
+  el.editFields.querySelectorAll("input").forEach((input) => {
+    payload[input.dataset.key] = input.value;
+  });
+  el.editSave.disabled = true;
+  el.editSave.textContent = "Сохраняю…";
+  try {
+    const response = await API.post(`tracks/${state.editing.id}`, payload);
+    const updated = response.track;
+    const index = state.tracks.findIndex((item) => item.id === updated.id);
+    if (index >= 0) state.tracks[index] = updated;
+    if (state.currentId === updated.id) updateNow(updated);
+    closeEditor();
+    renderLibrary();
+    syncTransport();
+    toast("Метаданные записаны, файл сохранён");
+  } catch (error) {
+    toast(`Не удалось сохранить: ${error.message}`);
+  } finally {
+    el.editSave.disabled = false;
+    el.editSave.textContent = "Сохранить";
+  }
+}
+
 /* ---------------------------------------------------------------- wiring */
 el.view.addEventListener("click", (event) => {
+  const remove = event.target.closest(".row-remove");
+  if (remove) {
+    event.stopPropagation();
+    removeFolder(Number(remove.dataset.remove));
+    return;
+  }
+  const edit = event.target.closest(".row-edit");
+  if (edit) {
+    event.stopPropagation();
+    openEditor(Number(edit.dataset.edit));
+    return;
+  }
   const row = event.target.closest(".row");
   if (!row) return;
   if (row.dataset.folder) {
@@ -446,15 +600,9 @@ el.repeat.addEventListener("click", () => {
 
 el.audio.addEventListener("play", syncPlayIcon);
 el.audio.addEventListener("pause", syncPlayIcon);
-el.audio.addEventListener("timeupdate", () => {
-  const duration = el.audio.duration || 0;
-  el.elapsed.textContent = formatTime(el.audio.currentTime);
-  el.duration.textContent = formatTime(duration);
-  if (duration) {
-    el.seek.value = String(Math.round((el.audio.currentTime / duration) * 1000));
-    el.seek.style.background = `linear-gradient(90deg, var(--accent) ${(el.audio.currentTime / duration) * 100}%, var(--surface-3) 0)`;
-  }
-});
+el.audio.addEventListener("loadedmetadata", syncTransport);
+el.audio.addEventListener("durationchange", syncTransport);
+el.audio.addEventListener("timeupdate", syncTransport);
 el.audio.addEventListener("ended", () => nextTrack(1));
 el.audio.addEventListener("error", () => toast("Не удалось воспроизвести файл"));
 
@@ -479,6 +627,25 @@ el.nowplaying.addEventListener("click", (event) => {
   if (event.target === el.nowplaying) closeNowPlaying();
 });
 
+el.npPlay.addEventListener("click", togglePlay);
+el.npPrev.addEventListener("click", () => nextTrack(-1));
+el.npNext.addEventListener("click", () => nextTrack(1));
+el.npShuffle.addEventListener("click", () => el.shuffle.click());
+el.npRepeat.addEventListener("click", () => el.repeat.click());
+el.npSeek.addEventListener("input", () => {
+  const duration = el.audio.duration || 0;
+  if (duration) el.audio.currentTime = (Number(el.npSeek.value) / 1000) * duration;
+});
+
+el.editCurrent.addEventListener("click", () => openEditor(state.currentId));
+el.npEdit.addEventListener("click", () => openEditor(state.currentId));
+el.editForm.addEventListener("submit", saveEditor);
+el.editClose.addEventListener("click", closeEditor);
+el.editCancel.addEventListener("click", closeEditor);
+el.editModal.addEventListener("click", (event) => {
+  if (event.target === el.editModal) closeEditor();
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
   if (event.code === "Space") { event.preventDefault(); togglePlay(); }
@@ -487,7 +654,10 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "KeyN") nextTrack(1);
   if (event.code === "KeyP") nextTrack(-1);
   if (event.code === "KeyM") { el.audio.muted = !el.audio.muted; el.mute.textContent = el.audio.muted ? "▯" : "▮"; }
-  if (event.code === "Escape") closeNowPlaying();
+  if (event.code === "Escape") {
+    if (!el.editModal.hidden) closeEditor();
+    else closeNowPlaying();
+  }
   if (event.key === "/") { event.preventDefault(); el.search.focus(); }
 });
 
