@@ -1,0 +1,271 @@
+"""SQLite library index: tracks, folders, playlists, lyrics, settings."""
+
+from __future__ import annotations
+
+import sqlite3
+import threading
+from pathlib import Path
+from typing import Any, Iterable
+
+SCHEMA_VERSION = 1
+
+TRACK_COLUMNS = (
+    "path",
+    "folder_id",
+    "title",
+    "artist",
+    "album",
+    "album_artist",
+    "track_no",
+    "disc_no",
+    "year",
+    "genre",
+    "duration",
+    "bitrate",
+    "sample_rate",
+    "channels",
+    "size",
+    "mtime",
+    "cover_hash",
+)
+
+SORTS = {
+    "title": "title COLLATE NOCASE, artist COLLATE NOCASE",
+    "artist": "artist COLLATE NOCASE, album COLLATE NOCASE, disc_no, track_no",
+    "album": "album COLLATE NOCASE, disc_no, track_no, title COLLATE NOCASE",
+    "duration": "duration DESC",
+    "added": "added_at DESC",
+    "played": "COALESCE(last_played, 0) DESC",
+    "year": "COALESCE(year, '') DESC, album COLLATE NOCASE, track_no",
+}
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS folders (
+    id INTEGER PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    added_at REAL NOT NULL,
+    last_scan_at REAL
+);
+
+CREATE TABLE IF NOT EXISTS tracks (
+    id INTEGER PRIMARY KEY,
+    path TEXT NOT NULL UNIQUE,
+    folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+    title TEXT NOT NULL DEFAULT '',
+    artist TEXT NOT NULL DEFAULT '',
+    album TEXT NOT NULL DEFAULT '',
+    album_artist TEXT NOT NULL DEFAULT '',
+    track_no INTEGER,
+    disc_no INTEGER,
+    year TEXT NOT NULL DEFAULT '',
+    genre TEXT NOT NULL DEFAULT '',
+    duration REAL NOT NULL DEFAULT 0,
+    bitrate INTEGER NOT NULL DEFAULT 0,
+    sample_rate INTEGER NOT NULL DEFAULT 0,
+    channels INTEGER NOT NULL DEFAULT 0,
+    size INTEGER NOT NULL DEFAULT 0,
+    mtime REAL NOT NULL DEFAULT 0,
+    cover_hash TEXT,
+    added_at REAL NOT NULL,
+    play_count INTEGER NOT NULL DEFAULT 0,
+    last_played REAL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title COLLATE NOCASE);
+CREATE INDEX IF NOT EXISTS idx_tracks_folder ON tracks(folder_id);
+
+CREATE TABLE IF NOT EXISTS playlists (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    created_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS playlist_tracks (
+    playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    PRIMARY KEY (playlist_id, position)
+);
+
+CREATE TABLE IF NOT EXISTS lyrics (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    synced TEXT,
+    plain TEXT,
+    instrumental INTEGER NOT NULL DEFAULT 0,
+    fetched_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+"""
+
+
+class Library:
+    """Thread-safe wrapper around one SQLite connection."""
+
+    def __init__(self, path: Path | str) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        self._migrate()
+
+    # ------------------------------------------------------------- lifecycle
+    def _migrate(self) -> None:
+        with self._lock:
+            version = self._conn.execute("PRAGMA user_version").fetchone()[0]
+            if version < SCHEMA_VERSION:
+                self._conn.executescript(SCHEMA)
+                self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                self._conn.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def __enter__(self) -> "Library":
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    # ---------------------------------------------------------------- tracks
+    def upsert_track(self, **values: Any) -> int:
+        row = {column: values.get(column) for column in TRACK_COLUMNS}
+        if not row["path"]:
+            raise ValueError("path is required")
+        for numeric in ("track_no", "disc_no"):
+            row[numeric] = int(row[numeric]) if row[numeric] not in (None, "") else None
+        for numeric in ("duration", "bitrate", "sample_rate", "channels", "size", "mtime"):
+            row[numeric] = float(row[numeric] or 0)
+        row["folder_id"] = int(row["folder_id"]) if row["folder_id"] is not None else None
+        for text in ("title", "artist", "album", "album_artist", "year", "genre", "cover_hash"):
+            row[text] = str(row[text] or "")
+
+        columns = ["path", "folder_id", "title", "artist", "album", "album_artist",
+                   "track_no", "disc_no", "year", "genre", "duration", "bitrate",
+                   "sample_rate", "channels", "size", "mtime", "cover_hash"]
+        placeholders = ", ".join("?" for _ in columns)
+        updates = ", ".join(f"{column}=excluded.{column}" for column in columns if column != "path")
+        sql = (
+            f"INSERT INTO tracks ({', '.join(columns)}, added_at) "
+            f"VALUES ({placeholders}, ?) "
+            f"ON CONFLICT(path) DO UPDATE SET {updates}"
+        )
+        params = [row[column] for column in columns] + [values.get("added_at") or 0]
+        with self._lock:
+            self._conn.execute(sql, params)
+            self._conn.commit()
+            existing = self._conn.execute("SELECT id FROM tracks WHERE path=?", (row["path"],)).fetchone()
+            return int(existing["id"]) if existing else 0
+
+    def track(self, track_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM tracks WHERE id=?", (track_id,)).fetchone()
+        return dict(row) if row else None
+
+    def track_by_path(self, path: Path | str) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM tracks WHERE path=?", (str(path),)).fetchone()
+        return dict(row) if row else None
+
+    def list_tracks(
+        self,
+        *,
+        sort: str = "artist",
+        query: str = "",
+        limit: int = 500,
+        offset: int = 0,
+    ) -> list[dict]:
+        where, params = self._filter(query)
+        order = SORTS.get(sort, SORTS["artist"])
+        sql = f"SELECT * FROM tracks {where} ORDER BY {order} LIMIT ? OFFSET ?"
+        with self._lock:
+            rows = self._conn.execute(sql, (*params, limit, offset)).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_tracks(self, query: str = "") -> int:
+        where, params = self._filter(query)
+        with self._lock:
+            row = self._conn.execute(f"SELECT COUNT(*) AS total FROM tracks {where}", params).fetchone()
+        return int(row["total"])
+
+    @staticmethod
+    def _filter(query: str) -> tuple[str, list[Any]]:
+        if not query.strip():
+            return "", []
+        like = f"%{query.strip()}%"
+        return (
+            "WHERE (title LIKE ? OR artist LIKE ? OR album LIKE ? OR path LIKE ?)",
+            [like, like, like, like],
+        )
+
+    def mark_played(self, track_id: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE tracks SET play_count=play_count+1, last_played=strftime('%s','now') WHERE id=?",
+                (track_id,),
+            )
+            self._conn.commit()
+
+    def tracks_under(self, folder_path: str) -> Iterable[dict]:
+        prefix = folder_path.rstrip("\\/") + "%"
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM tracks WHERE path LIKE ?", (prefix,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def delete_tracks(self, paths: Iterable[str]) -> int:
+        paths = list(paths)
+        if not paths:
+            return 0
+        with self._lock:
+            cursor = self._conn.executemany("DELETE FROM tracks WHERE path=?", [(path,) for path in paths])
+            self._conn.commit()
+        return cursor.rowcount
+
+    # --------------------------------------------------------------- folders
+    def add_folder(self, path: Path | str) -> int:
+        import time
+
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO folders (path, added_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
+                (str(path), time.time()),
+            )
+            self._conn.commit()
+            row = self._conn.execute("SELECT id FROM folders WHERE path=?", (str(path),)).fetchone()
+        return int(row["id"]) if row else 0
+
+    def folders(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM folders ORDER BY path COLLATE NOCASE").fetchall()
+        return [dict(row) for row in rows]
+
+    def remove_folder(self, folder_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM folders WHERE id=?", (folder_id,))
+            self._conn.commit()
+
+    # -------------------------------------------------------------- settings
+    def setting(self, key: str, default: str | None = None) -> str | None:
+        with self._lock:
+            row = self._conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+            self._conn.commit()
