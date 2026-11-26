@@ -1065,29 +1065,62 @@ function lyricsHaveText() {
   );
 }
 
-function applyLyricsVisibility() {
+let lyricsAnimToken = 0;
+
+function slideLeftIntoPlace(first) {
+  const last = el.npLeft.getBoundingClientRect();
+  const shift = first.left - last.left;
+  if (Math.abs(shift) < 1 || !el.npLeft.animate) return;
+  el.npLeft.getAnimations().forEach((animation) => animation.cancel());
+  el.npLeft.animate(
+    [{ transform: `translateX(${shift}px)` }, { transform: "translateX(0)" }],
+    { duration: 420, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+  );
+}
+
+async function applyLyricsVisibility(animated = true) {
   const hasText = lyricsHaveText();
   const shown = hasText && state.lyricsVisible;
   const wasShown = el.npBody.classList.contains("with-lyrics");
 
-  if (shown !== wasShown) {
-    const first = el.npLeft.getBoundingClientRect();
-    el.npBody.classList.toggle("with-lyrics", shown);
-    const last = el.npLeft.getBoundingClientRect();
-    const shift = first.left - last.left;
-    if (Math.abs(shift) > 1 && el.npLeft.animate) {
-      el.npLeft.animate(
-        [{ transform: `translateX(${shift}px)` }, { transform: "translateX(0)" }],
-        { duration: 340, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
-      );
-    }
-    if (shown && el.npRight.animate) {
-      el.npRight.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, easing: "ease" });
-    }
-  }
-
   el.npLyricsToggle.disabled = !hasText;
   setIcon(el.npLyricsToggle, state.lyricsVisible ? "eye" : "eye-off");
+
+  if (shown === wasShown) return;
+
+  const token = ++lyricsAnimToken;
+  if (!animated) {
+    el.npBody.classList.toggle("with-lyrics", shown);
+    return;
+  }
+
+  if (!shown) {
+    try {
+      const fade = el.npRight.animate(
+        [{ opacity: 1, transform: "translateX(0)" }, { opacity: 0, transform: "translateX(14px)" }],
+        { duration: 200, easing: "ease", fill: "forwards" }
+      );
+      await fade.finished;
+    } catch (error) {
+      /* animation cancelled by a newer toggle */
+    }
+    if (token !== lyricsAnimToken) return;
+    const first = el.npLeft.getBoundingClientRect();
+    el.npBody.classList.remove("with-lyrics");
+    slideLeftIntoPlace(first);
+    return;
+  }
+
+  const first = el.npLeft.getBoundingClientRect();
+  el.npBody.classList.add("with-lyrics");
+  slideLeftIntoPlace(first);
+  if (el.npRight.animate) {
+    el.npRight.getAnimations().forEach((animation) => animation.cancel());
+    el.npRight.animate(
+      [{ opacity: 0, transform: "translateX(18px)" }, { opacity: 1, transform: "translateX(0)" }],
+      { duration: 340, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }
+    );
+  }
 }
 
 function toggleLyrics() {
