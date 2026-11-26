@@ -178,8 +178,7 @@
         <button type="button" class="ghost" id="cover-pick">Выбрать обложку…</button>
         <button type="button" class="ghost" id="cover-find">Найти в интернете</button>
         <button type="button" class="ghost" id="cover-remove">Убрать обложку</button>
-        <label class="check"><input type="checkbox" id="cover-all"> Ко всем трекам альбома</label>
-        <div class="hint" id="cover-hint">Применится ко всем трекам альбома</div>
+        <div class="hint" id="cover-hint">Обложка хранится в приложении, файлы не меняются</div>
       </div>
       <input type="file" id="cover-file" accept="image/*" hidden>
     </div>
@@ -198,7 +197,8 @@
       <button type="button" class="icon-btn" id="lyrics-close" title="Закрыть">✕</button>
     </div>
     <div class="modal-file" id="lyrics-file"></div>
-    <textarea class="lyrics-input" id="lyrics-text" placeholder="Вставьте текст. Для синхронизации с музыкой используйте LRC:&#10;[00:12.34] первая строка&#10;[00:16.00] вторая строка"></textarea>
+    <textarea class="lyrics-input" id="lyrics-text" placeholder="Вставьте текст — обычный или LRC с таймкодами:&#10;[00:12.34] первая строка&#10;[00:16.00] вторая строка"></textarea>
+    <div class="hint" id="lyrics-format">Можно вставить обычный текст или LRC — формат определится сам</div>
     <div class="modal-actions">
       <button type="button" class="ghost" id="lyrics-find">Найти в интернете</button>
       <button type="button" class="ghost" id="lyrics-clear">Удалить текст</button>

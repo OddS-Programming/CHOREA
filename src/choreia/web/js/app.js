@@ -85,6 +85,7 @@ const el = {
   lyricsModal: document.getElementById("lyrics-modal"),
   lyricsForm: document.getElementById("lyrics-form"),
   lyricsText: document.getElementById("lyrics-text"),
+  lyricsFormat: document.getElementById("lyrics-format"),
   lyricsFile: document.getElementById("lyrics-file"),
   lyricsClose: document.getElementById("lyrics-close"),
   lyricsCancel: document.getElementById("lyrics-cancel"),
@@ -113,7 +114,6 @@ const el = {
   coverRemove: document.getElementById("cover-remove"),
   coverFile: document.getElementById("cover-file"),
   coverHint: document.getElementById("cover-hint"),
-  coverAll: document.getElementById("cover-all"),
   settingsModal: document.getElementById("settings-modal"),
   openSettings: document.getElementById("open-settings"),
   settingsClose: document.getElementById("settings-close"),
@@ -843,9 +843,17 @@ async function renderAlbums() {
 
 async function openAlbum(album, artist) {
   try {
-    const data = await API.get("albums/tracks", { album });
+    const data = await API.get("albums/tracks", { album, artist });
     state.view = "album";
-    state.collection = { kind: "album", album, artist, tracks: data.tracks, parent: false };
+    state.collection = {
+      kind: "album",
+      album,
+      artist,
+      tracks: data.tracks,
+      cover_hash: data.cover_hash || "",
+      custom_cover: Boolean(data.custom_cover),
+      parent: false,
+    };
     state.selection = new Set();
     state.lastSelected = null;
     el.crumbs.textContent = album;
@@ -1346,11 +1354,10 @@ function openAlbumCover() {
   el.coverFile.value = "";
   el.coverResults.hidden = true;
   el.coverResults.innerHTML = "";
-  const preview = tracks.find((track) => track.cover_hash);
-  setCoverDialogPreview(preview ? API.thumb(preview.cover_hash, 320) : "");
-  el.coverAll.checked = false;
+  const preview = state.collection.cover_hash;
+  setCoverDialogPreview(preview ? API.thumb(preview, 320) : "");
   el.coverHint.textContent = tracks.length
-    ? "Меняется обложка альбома — один файл. Массово — по галочке ниже"
+    ? "Обложка хранится в приложении, файлы и теги не меняются"
     : "В альбоме нет треков";
   el.coverSave.disabled = !tracks.length;
   el.coverModal.hidden = false;
@@ -1391,7 +1398,7 @@ async function pickAlbumCover(key, button) {
     el.coverResults
       .querySelectorAll(".cover-choice")
       .forEach((node) => node.classList.toggle("active", node === button));
-    el.coverHint.textContent = "Обложка применится ко всем трекам альбома после «Сохранить».";
+    el.coverHint.textContent = "Обложка сохранится в приложении после «Сохранить». Файлы не меняются.";
   } catch (error) {
     toast("Не удалось загрузить обложку");
   }
@@ -1411,18 +1418,15 @@ async function saveAlbumCover() {
       album: albumCover.album,
       album_artist: albumCover.artist,
       action: albumCover.action,
-      scope: el.coverAll.checked ? "all" : "track",
     };
     if (albumCover.action === "set") payload.cover = albumCover.dataUrl;
-    const result = await API.post("album-cover", payload);
+    await API.post("album-cover", payload);
     closeAlbumCover();
     await refreshAfterEdit();
     toast(
-      result.failed
-        ? `Обложка обновлена: ${result.updated}, ошибок: ${result.failed}`
-        : payload.scope === "all"
-          ? `Обложка применена ко всем трекам: ${result.updated}`
-          : "Обложка альбома обновлена"
+      albumCover.action === "remove"
+        ? "Обложка альбома сброшена"
+        : "Обложка альбома сохранена в приложении"
     );
   } catch (error) {
     toast(`Не удалось записать обложку: ${error.message}`);
@@ -1698,8 +1702,22 @@ function openLyricsEditor() {
   }
   el.lyricsFile.textContent = `${track.artist || ""} — ${track.title || ""}`;
   el.lyricsText.value = state.lyrics ? state.lyrics.synced || state.lyrics.plain || "" : "";
+  updateLyricsFormat();
   el.lyricsModal.hidden = false;
   requestAnimationFrame(() => el.lyricsText.focus());
+}
+
+function updateLyricsFormat() {
+  const text = el.lyricsText.value;
+  const timed = text.match(/^\[\d{1,3}:\d{1,2}(?:[.,]\d{1,3})?\]/gm) || [];
+  const lines = text.split("\n").filter((line) => line.trim()).length;
+  if (!lines) {
+    el.lyricsFormat.textContent = "Можно вставить обычный текст или LRC — формат определится сам";
+  } else if (timed.length) {
+    el.lyricsFormat.textContent = `LRC: ${timed.length} строк с таймкодами — текст будет синхронизирован`;
+  } else {
+    el.lyricsFormat.textContent = `Обычный текст: ${lines} строк — без синхронизации`;
+  }
 }
 
 function closeLyricsEditor() {
@@ -1985,7 +2003,7 @@ el.coverRemove.addEventListener("click", () => {
   state.albumCover.dataUrl = null;
   setCoverDialogPreview("");
   el.coverResults.querySelectorAll(".cover-choice").forEach((node) => node.classList.remove("active"));
-  el.coverHint.textContent = "Обложка будет удалена у всех треков альбома";
+  el.coverHint.textContent = "Обложка вернётся к картинке из файлов";
 });
 el.coverFile.addEventListener("change", () => {
   const file = el.coverFile.files && el.coverFile.files[0];
@@ -2004,12 +2022,6 @@ el.coverFile.addEventListener("change", () => {
     el.coverHint.textContent = file.name;
   };
   reader.readAsDataURL(file);
-});
-el.coverAll.addEventListener("change", () => {
-  if (!state.albumCover) return;
-  el.coverHint.textContent = el.coverAll.checked
-    ? "Обложка запишется во все треки альбома"
-    : "Меняется обложка альбома — один файл";
 });
 el.coverSave.addEventListener("click", saveAlbumCover);
 el.coverCancel.addEventListener("click", closeAlbumCover);
@@ -2093,6 +2105,7 @@ el.selectionDelete.addEventListener("click", async () => {
 });
 
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
+el.lyricsText.addEventListener("input", updateLyricsFormat);
 el.uploadFiles.addEventListener("change", async () => {
   const files = [...el.uploadFiles.files];
   el.uploadFiles.value = "";

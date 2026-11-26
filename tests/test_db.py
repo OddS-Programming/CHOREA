@@ -263,6 +263,24 @@ def test_album_tracks_keep_artist_filter_when_it_matches(tmp_path: Path) -> None
     library.close()
 
 
+def test_album_cover_override_wins_over_file_art(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(path="C:/m/a.mp3", title="A", artist="X", album="Demo", cover_hash="file")
+
+    library.set_album_cover("demo", "custom")
+    album = library.albums()[0]
+    assert album["cover_hash"] == "custom"
+    assert album["custom_cover"] is True
+    assert library.album_cover("DEMO") == "custom"
+
+    library.remove_album_cover("DEMO")
+    album = library.albums()[0]
+    assert album["cover_hash"] == "file"
+    assert album["custom_cover"] is False
+    assert library.album_cover("Demo") is None
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

@@ -706,9 +706,7 @@ class Handler(BaseHTTPRequestHandler):
         return make_picture(0, data, type=3, desc="Cover", source="file")
 
     def _album_cover(self) -> None:
-        """Replace or remove the cover of every track in one album, keeping tags."""
-        from pathlib import Path
-
+        """Store or clear the album art inside the app; audio files are never touched."""
         library = self.context.library
         payload = self._read_json()
         album = str(payload.get("album") or "").strip()
@@ -720,44 +718,28 @@ class Handler(BaseHTTPRequestHandler):
         if action not in {"set", "remove"}:
             self._error(400, "unsupported action")
             return
-        keep = None
+
+        picture = None
         if action == "set":
             try:
-                keep = self._cover_picture(str(payload.get("cover") or ""))
+                picture = self._cover_picture(str(payload.get("cover") or ""))
             except ValueError as exc:
                 status = 413 if str(exc) == "cover too large" else 400
                 self._error(status, str(exc))
                 return
 
-        tracks = library.album_tracks(album, artist)
-        if not tracks:
+        if not library.album_tracks(album, artist):
             self._error(404, "no tracks in album")
             return
 
-        scope = str(payload.get("scope") or "track")
-        if scope == "all":
-            targets = tracks
-        else:
-            # The album art is represented by the first track that has a cover
-            # (same rule the album grid uses), so only that file is rewritten.
-            chosen = next((track for track in tracks if track["cover_hash"]), tracks[0])
-            targets = [chosen]
+        if action == "remove":
+            library.remove_album_cover(album)
+            self._json({"custom": False})
+            return
 
-        updated = 0
-        failed = 0
-        for track in targets:
-            source = Path(track["path"])
-            if not source.exists():
-                failed += 1
-                continue
-            try:
-                report = inspect_file(source)
-                clean_file(source, keep=keep, metadata=report.fields)
-                refresh_track(library, self.context.thumbs, source)
-                updated += 1
-            except Exception:
-                failed += 1
-        self._json({"updated": updated, "failed": failed})
+        digest = self.context.thumbs.store(picture.data)
+        library.set_album_cover(album, digest)
+        self._json({"custom": True, "cover_hash": digest})
 
     def _update_track(self, track_id: int) -> None:
         from pathlib import Path
@@ -931,7 +913,18 @@ class Handler(BaseHTTPRequestHandler):
         if route == "albums/tracks":
             album = (query.get("album") or [""])[0]
             artist = (query.get("artist") or [""])[0]
-            self._json({"tracks": library.album_tracks(album, artist)})
+            tracks = library.album_tracks(album, artist)
+            override = library.album_cover(album)
+            cover_hash = override or next(
+                (track["cover_hash"] for track in tracks if track["cover_hash"]), ""
+            )
+            self._json(
+                {
+                    "tracks": tracks,
+                    "cover_hash": cover_hash,
+                    "custom_cover": bool(override),
+                }
+            )
             return
         if route == "playlists":
             self._json({"playlists": library.playlists()})

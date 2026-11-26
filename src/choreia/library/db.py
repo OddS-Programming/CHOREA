@@ -102,6 +102,12 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS album_covers (
+    album TEXT NOT NULL COLLATE NOCASE PRIMARY KEY,
+    cover_hash TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
 """
 
 
@@ -307,6 +313,42 @@ class Library:
             rows = query("")
         return rows
 
+    def album_cover(self, album: str) -> str | None:
+        album = album.strip()
+        if not album:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT cover_hash FROM album_covers WHERE album = ? COLLATE NOCASE", (album,)
+            ).fetchone()
+        return row["cover_hash"] if row else None
+
+    def set_album_cover(self, album: str, cover_hash: str) -> None:
+        """Keep an album cover inside the app without touching the audio files."""
+        import time
+
+        album = album.strip()
+        if not album or not cover_hash:
+            return
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO album_covers (album, cover_hash, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(album) DO UPDATE SET cover_hash=excluded.cover_hash, "
+                "updated_at=excluded.updated_at",
+                (album, cover_hash, time.time()),
+            )
+            self._conn.commit()
+
+    def remove_album_cover(self, album: str) -> None:
+        album = album.strip()
+        if not album:
+            return
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM album_covers WHERE album = ? COLLATE NOCASE", (album,)
+            )
+            self._conn.commit()
+
     def albums(self) -> list[dict]:
         from collections import Counter
 
@@ -326,6 +368,10 @@ class Library:
             return Counter(pool).most_common(1)[0][0] if pool else ""
 
         with self._lock:
+            overrides = {
+                row["album"].lower(): row["cover_hash"]
+                for row in self._conn.execute("SELECT album, cover_hash FROM album_covers")
+            }
             groups = self._conn.execute(
                 "SELECT album, COUNT(*) AS tracks FROM tracks WHERE album != '' "
                 "GROUP BY album COLLATE NOCASE ORDER BY album COLLATE NOCASE"
@@ -341,13 +387,15 @@ class Library:
                 # The grid shows the first track that has art, and the album-cover
                 # dialog rewrites exactly that file.
                 cover = next((row for row in tracks if row["cover_hash"]), tracks[0] if tracks else None)
+                custom = overrides.get(str(group["album"]).lower())
                 albums.append(
                     {
                         "album": group["album"],
                         "album_artist": primary_artist(list(tracks)),
                         "tracks": group["tracks"],
-                        "cover_hash": cover["cover_hash"] if cover else "",
+                        "cover_hash": custom or (cover["cover_hash"] if cover else ""),
                         "cover_track_id": int(cover["id"]) if cover else None,
+                        "custom_cover": bool(custom),
                     }
                 )
         return albums

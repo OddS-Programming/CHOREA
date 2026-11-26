@@ -504,10 +504,20 @@ def _album_with_two_tracks(server):
     return running, track, second, cover
 
 
-def test_album_cover_changes_only_the_album_art_track_by_default(server) -> None:
-    from choreia.core import inspect_file
-
+def test_album_cover_is_stored_in_the_app_only(server) -> None:
     running, track, second, cover = _album_with_two_tracks(server)
+    library = running.context.library
+    files = (track, second)
+    before = {path: path.read_bytes() for path in files}
+    before_backups = {
+        path: (
+            path.with_name(path.name + ".bak").exists(),
+            path.with_name(path.name + ".bak").stat().st_mtime_ns
+            if path.with_name(path.name + ".bak").exists()
+            else 0,
+        )
+        for path in files
+    }
 
     status, payload = _post(
         running,
@@ -516,30 +526,30 @@ def test_album_cover_changes_only_the_album_art_track_by_default(server) -> None
     )
 
     assert status == 200
-    assert payload == {"updated": 1, "failed": 0}
-    assert inspect_file(track).front_cover is not None
-    assert inspect_file(second).front_cover is None
+    assert payload["custom"] is True
+    digest = payload["cover_hash"]
+    for path in files:
+        assert path.read_bytes() == before[path]
+        backup = path.with_name(path.name + ".bak")
+        after = (backup.exists(), backup.stat().st_mtime_ns if backup.exists() else 0)
+        assert after == before_backups[path]
+    assert library.album_cover("Album") == digest
+    assert (running.context.thumbs.root / f"{digest}.src").exists()
 
+    album = next(item for item in library.albums() if item["album"] == "Album")
+    assert album["custom_cover"] is True
+    assert album["cover_hash"] == digest
 
-def test_album_cover_applies_and_removes_for_the_whole_album(server) -> None:
-    from choreia.core import inspect_file
-
-    running, track, second, cover = _album_with_two_tracks(server)
-    scope = {"album": "Album", "album_artist": "Artist", "scope": "all"}
-
-    status, payload = _post(running, "/api/album-cover", {**scope, "action": "set", "cover": cover})
-
-    assert status == 200
-    assert payload == {"updated": 2, "failed": 0}
-    for path in (track, second):
-        assert inspect_file(path).front_cover is not None
-
-    status, payload = _post(running, "/api/album-cover", {**scope, "action": "remove"})
+    status, payload = _post(
+        running, "/api/album-cover", {"album": "Album", "album_artist": "Artist", "action": "remove"}
+    )
 
     assert status == 200
-    assert payload["updated"] == 2
-    for path in (track, second):
-        assert inspect_file(path).front_cover is None
+    assert payload["custom"] is False
+    assert library.album_cover("Album") is None
+    album = next(item for item in library.albums() if item["album"] == "Album")
+    assert album["custom_cover"] is False
+    assert album["cover_hash"] == ""
 
 
 def test_album_cover_rejects_bad_input(server) -> None:
@@ -751,7 +761,7 @@ def test_album_cover_works_without_album_artist_tag(server) -> None:
     from PIL import Image
 
     import helpers
-    from choreia.core import clean_file, inspect_file
+    from choreia.core import clean_file
 
     running, library, track = server
     second = helpers.copy_asset("mp3", track.parent / "second.mp3")
@@ -771,19 +781,12 @@ def test_album_cover_works_without_album_artist_tag(server) -> None:
     status, payload = _post(
         running,
         "/api/album-cover",
-        {
-            "album": "DEMOVERSION",
-            "album_artist": "CODE10",
-            "action": "set",
-            "cover": cover,
-            "scope": "all",
-        },
+        {"album": "DEMOVERSION", "album_artist": "CODE10", "action": "set", "cover": cover},
     )
 
     assert status == 200
-    assert payload == {"updated": 2, "failed": 0}
-    assert inspect_file(track).front_cover is not None
-    assert inspect_file(second).front_cover is not None
+    assert payload["custom"] is True
+    assert library.album_cover("DEMOVERSION") == payload["cover_hash"]
 
 
 def test_update_track_metadata(server) -> None:
