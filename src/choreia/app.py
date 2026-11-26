@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -13,6 +15,46 @@ from .library.thumbs import ThumbCache
 from .player.server import Server
 
 APP_NAME = "Choreia"
+_MUTEX = None
+ERROR_ALREADY_EXISTS = 183
+
+
+def acquire_single_instance() -> bool:
+    """One player per user session; a second launch exits instead of hanging."""
+    global _MUTEX
+    if sys.platform != "win32":
+        return True
+    _MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\ChoreiaPlayer")
+    if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            "χορεία уже запущена. Найдите окно на панели задач.",
+            "χορεία",
+            0x40,
+        )
+        return False
+    return True
+
+
+def configure_logging(directory: Path) -> None:
+    try:
+        from logging.handlers import RotatingFileHandler
+
+        handler = RotatingFileHandler(
+            directory / "choreia.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"
+        )
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+            handlers=[handler],
+        )
+    except Exception:
+        pass
+
+    def report(exc_type, exc_value, exc_tb):  # noqa: ANN001
+        logging.exception("unhandled", exc_info=(exc_type, exc_value, exc_tb))
+
+    sys.excepthook = report
 
 
 def app_dir() -> Path:
@@ -65,6 +107,9 @@ def main() -> int:
 
     directory = app_dir()
     directory.mkdir(parents=True, exist_ok=True)
+    configure_logging(directory)
+    if not acquire_single_instance():
+        return 0
     library = Library(directory / "library.db")
     thumbs = ThumbCache(directory / "cache" / "thumbs")
     load_credentials(library, directory)

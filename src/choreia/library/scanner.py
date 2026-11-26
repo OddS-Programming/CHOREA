@@ -132,6 +132,7 @@ class Scanner:
         cover_hash = None
         if cover is not None:
             cover_hash, _ = self.thumbs.ensure(cover.data, 320)
+            self.thumbs.ensure(cover.data, 64)
 
         fields = report.fields
         self.library.upsert_track(

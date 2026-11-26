@@ -16,6 +16,7 @@ const state = {
   editing: null,
   lyrics: null,
   lyricLines: [],
+  loading: true,
 };
 
 const el = {
@@ -143,6 +144,17 @@ function renderRows() {
 }
 
 function renderLibrary() {
+  if (state.loading) {
+    el.view.innerHTML = `
+      <div class="empty">
+        <div>
+          <h2>Загружаю библиотеку…</h2>
+          <p>Читаю индекс папок и обложки.</p>
+        </div>
+      </div>`;
+    listBody = rowsEl = null;
+    return;
+  }
   if (!state.tracks.length) {
     el.view.innerHTML = `
       <div class="empty">
@@ -179,13 +191,15 @@ function renderLibrary() {
 async function loadTracks() {
   try {
     const payload = await API.get("tracks", {
-      sort: state.sort, q: state.query, limit: 2000, offset: 0,
+      sort: state.sort, q: state.query, limit: 1000, offset: 0,
     });
     state.tracks = payload.tracks;
     state.total = payload.total;
+    state.loading = false;
     if (state.view === "library") renderLibrary();
     updatePlayingMark();
   } catch (error) {
+    state.loading = false;
     toast(`Не удалось загрузить треки: ${error.message}`);
   }
 }
