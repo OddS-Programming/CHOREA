@@ -66,7 +66,8 @@ def read(path: Path) -> FileReport:
     try:
         tag = ID3(path)
     except ID3NoHeaderError:
-        report.warnings.append("ID3v2-тег не найден")
+        if not report.regions:
+            report.warnings.append("тегов в файле нет")
     except Exception as exc:  # a corrupt tag must not stop the inspection
         report.warnings.append(f"ID3v2-тег не читается: {exc}")
 

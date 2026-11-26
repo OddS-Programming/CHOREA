@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -151,6 +153,20 @@ def test_clean_removes_ape_that_sits_before_a_trailing_tag(tmp_path: Path, asset
 
     kinds = {region.kind for region in scan_mp3_regions(path)}
     assert kinds == {"id3v2"}
+
+
+def test_read_only_file_is_refused_without_leftovers(tmp_path: Path, asset) -> None:
+    path, _ = _mp3_with_pictures(tmp_path, asset)
+    original = path.read_bytes()
+    os.chmod(path, stat.S_IREAD)
+    try:
+        with pytest.raises(PermissionError):
+            clean_file(path, keep=None, metadata={"title": "x"})
+    finally:
+        os.chmod(path, stat.S_IWRITE)
+
+    assert path.read_bytes() == original
+    assert not list(tmp_path.glob("*.coverfix-tmp"))
 
 
 def test_backup_created_and_original_restored_on_error(tmp_path: Path, asset) -> None:
