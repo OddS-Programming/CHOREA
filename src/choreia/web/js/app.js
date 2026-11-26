@@ -1068,7 +1068,6 @@ function applyLyricsVisibility() {
   const shown = hasText && state.lyricsVisible;
   el.npBody.classList.toggle("with-lyrics", shown);
   el.npLyricsToggle.disabled = !hasText;
-  el.npLyricsToggle.classList.toggle("on", shown);
   setIcon(el.npLyricsToggle, state.lyricsVisible ? "eye" : "eye-off");
 }
 

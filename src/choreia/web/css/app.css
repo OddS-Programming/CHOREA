@@ -280,6 +280,8 @@ button { font: inherit; color: inherit; }
 .icon-btn.on { color: var(--accent); }
 .icon-btn:active { transform: scale(0.92); }
 .icon-btn:disabled { opacity: 0.3; cursor: default; background: transparent; color: var(--dim); }
+#np-lyrics-toggle { color: var(--muted); }
+#np-lyrics-toggle:hover:not(:disabled) { color: var(--muted); background: var(--surface-3); }
 
 .icon-btn svg { width: 18px; height: 18px; fill: currentColor; display: block; pointer-events: none; }
 .play-btn svg { width: 20px; height: 20px; fill: currentColor; display: block; pointer-events: none; }
