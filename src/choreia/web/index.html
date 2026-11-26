@@ -66,11 +66,11 @@
 
   <div class="controls">
     <div class="buttons">
-      <button class="icon-btn" id="shuffle" title="Перемешать">⤨</button>
-      <button class="icon-btn" id="prev" title="Предыдущий">⏮</button>
-      <button class="play-btn" id="play" title="Играть">▶</button>
-      <button class="icon-btn" id="next" title="Следующий">⏭</button>
-      <button class="icon-btn" id="repeat" title="Повтор">↻</button>
+      <button class="icon-btn" id="shuffle" title="Перемешать"></button>
+      <button class="icon-btn" id="prev" title="Предыдущий"></button>
+      <button class="play-btn" id="play" title="Играть"></button>
+      <button class="icon-btn" id="next" title="Следующий"></button>
+      <button class="icon-btn" id="repeat" title="Повтор"></button>
     </div>
     <div class="seek-row">
       <span class="time" id="elapsed">0:00</span>
@@ -80,44 +80,45 @@
   </div>
 
   <div class="volume-wrap">
-    <button class="icon-btn" id="mute" title="Звук">▮</button>
+    <button class="icon-btn" id="mute" title="Звук"></button>
     <input class="volume" id="volume" type="range" min="0" max="100" value="80" step="1">
   </div>
 </footer>
 
 <div class="nowplaying" id="nowplaying" hidden>
   <div class="np-backdrop" id="np-backdrop"></div>
-  <div class="np-body">
-    <button class="np-close" id="np-close" title="Закрыть">✕</button>
-    <div class="np-cover" id="np-cover"></div>
-    <div class="np-info">
-      <div class="np-title" id="np-title"></div>
-      <div class="np-artist" id="np-artist"></div>
-      <div class="np-album" id="np-album"></div>
+  <div class="np-body" id="np-body">
+    <div class="np-left">
+      <div class="np-cover" id="np-cover"></div>
+      <div class="np-info">
+        <div class="np-title" id="np-title"></div>
+        <div class="np-artist" id="np-artist"></div>
+        <div class="np-album" id="np-album"></div>
+      </div>
+      <canvas class="np-spectrum" id="spectrum" width="520" height="90"></canvas>
+      <div class="np-controls">
+        <button class="icon-btn" id="np-shuffle" title="Перемешать"></button>
+        <button class="icon-btn" id="np-prev" title="Предыдущий"></button>
+        <button class="play-btn" id="np-play" title="Играть"></button>
+        <button class="icon-btn" id="np-next" title="Следующий"></button>
+        <button class="icon-btn" id="np-repeat" title="Повтор"></button>
+        <button class="icon-btn" id="np-lyrics-edit" title="Текст песни"></button>
+      </div>
+      <div class="np-seek-row">
+        <span class="time" id="np-elapsed">0:00</span>
+        <input class="seek" id="np-seek" type="range" min="0" max="1000" value="0" step="1">
+        <span class="time" id="np-duration">0:00</span>
+        <button class="icon-btn" id="np-mute" title="Звук"></button>
+        <input class="volume np-volume" id="np-volume" type="range" min="0" max="100" value="80" step="1">
+      </div>
+      <div class="np-actions">
+        <button class="ghost" id="np-edit">Изменить метаданные</button>
+      </div>
     </div>
-
-    <div class="np-controls">
-      <button class="icon-btn" id="np-shuffle" title="Перемешать">⤨</button>
-      <button class="icon-btn" id="np-prev" title="Предыдущий">⏮</button>
-      <button class="play-btn" id="np-play" title="Играть">▶</button>
-      <button class="icon-btn" id="np-next" title="Следующий">⏭</button>
-      <button class="icon-btn" id="np-repeat" title="Повтор">↻</button>
-      <button class="icon-btn" id="np-lyrics-edit" title="Текст песни">☰</button>
+    <div class="np-right">
+      <div class="np-lyrics" id="np-lyrics"></div>
+      <button class="lyrics-follow" id="lyrics-follow" hidden>К текущей строке</button>
     </div>
-
-    <div class="np-seek-row">
-      <span class="time" id="np-elapsed">0:00</span>
-      <input class="seek" id="np-seek" type="range" min="0" max="1000" value="0" step="1">
-      <span class="time" id="np-duration">0:00</span>
-      <button class="icon-btn" id="np-mute" title="Звук">▮</button>
-      <input class="volume np-volume" id="np-volume" type="range" min="0" max="100" value="80" step="1">
-    </div>
-
-    <div class="np-actions">
-      <button class="ghost" id="np-edit">Изменить метаданные</button>
-    </div>
-    <canvas class="np-spectrum" id="spectrum" width="520" height="120"></canvas>
-    <div class="np-lyrics" id="np-lyrics">Текст появится здесь</div>
   </div>
 </div>
 

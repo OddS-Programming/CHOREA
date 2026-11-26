@@ -16,6 +16,7 @@ const state = {
   editing: null,
   lyrics: null,
   lyricLines: [],
+  lyricsFollow: true,
   loading: true,
 };
 
@@ -59,6 +60,7 @@ const el = {
   npVolume: document.getElementById("np-volume"),
   npEdit: document.getElementById("np-edit"),
   npLyrics: document.getElementById("np-lyrics"),
+  npBody: document.getElementById("np-body"),
   npLyricsEdit: document.getElementById("np-lyrics-edit"),
   lyricsModal: document.getElementById("lyrics-modal"),
   lyricsForm: document.getElementById("lyrics-form"),
@@ -67,6 +69,7 @@ const el = {
   lyricsClose: document.getElementById("lyrics-close"),
   lyricsCancel: document.getElementById("lyrics-cancel"),
   lyricsClear: document.getElementById("lyrics-clear"),
+  lyricsFollow: document.getElementById("lyrics-follow"),
   editCurrent: document.getElementById("edit-current"),
   editModal: document.getElementById("edit-modal"),
   editForm: document.getElementById("edit-form"),
@@ -87,6 +90,31 @@ let analyser = null;
 let spectrumFrame = null;
 let listBody = null;
 let rowsEl = null;
+
+const ICONS = {
+  play: '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>',
+  prev: '<svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zm2 7 12-7v14z"/></svg>',
+  next: '<svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5l12 7-12 7z"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24"><path d="M17 3l4 4-4 4V8h-2.2c-1 0-1.6.4-2.3 1.4l-1.1 1.6-1.3-1.8C9.3 8.1 8.4 7.5 7.2 7.5H3v2h4.2c.5 0 .9.2 1.4.8l1.6 2.2-1.7 2.4c-.4.6-.8.8-1.3.8H3v2h4.2c1.2 0 2.1-.6 2.9-1.7l1.3-1.8 1.1 1.6c.7 1 1.3 1.4 2.3 1.4H17v3l4-4-4-4v3h-1.9c-.5 0-.9-.2-1.4-.9l-1.5-2.1 1.6-2.3c.4-.6.8-.8 1.3-.8H17z"/></svg>',
+  repeat: '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>',
+  "repeat-one": '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/><path d="M11 15h1.6v-4H11l-.9.9v.9h.9z"/></svg>',
+  volume: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>',
+  mute: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.6 3 2.4 2.4-1.4 1.4L15.2 13l-2.4 2.4-1.4-1.4L13.8 12l-2.4-2.4 1.4-1.4L15.2 11l2.4-2.4 1.4 1.4z"/></svg>',
+  lyrics: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/></svg>',
+};
+
+function setIcon(button, name) {
+  if (button) button.innerHTML = ICONS[name] || "";
+}
+
+for (const [id, name] of Object.entries({
+  shuffle: "shuffle", prev: "prev", play: "play", next: "next", repeat: "repeat",
+  mute: "volume", "np-shuffle": "shuffle", "np-prev": "prev", "np-play": "play",
+  "np-next": "next", "np-repeat": "repeat", "np-mute": "volume", "np-lyrics-edit": "lyrics",
+})) {
+  setIcon(document.getElementById(id), name);
+}
 
 /* ------------------------------------------------------------------ utils */
 function formatTime(seconds) {
@@ -314,14 +342,13 @@ function syncPlayIcon() {
 
 function syncTransport() {
   const playing = !el.audio.paused && Boolean(state.currentId);
-  const icon = playing ? "❚❚" : "▶";
-  el.play.textContent = icon;
-  el.npPlay.textContent = icon;
+  setIcon(el.play, playing ? "pause" : "play");
+  setIcon(el.npPlay, playing ? "pause" : "play");
 
   for (const button of [el.shuffle, el.npShuffle]) button.classList.toggle("on", state.shuffle);
   for (const button of [el.repeat, el.npRepeat]) {
     button.classList.toggle("on", state.repeat !== "off");
-    button.textContent = state.repeat === "one" ? "↻¹" : "↻";
+    setIcon(button, state.repeat === "one" ? "repeat-one" : "repeat");
   }
 
   const duration = el.audio.duration || 0;
@@ -338,9 +365,9 @@ function syncTransport() {
   }
 
   el.npVolume.value = String(Math.round(el.audio.volume * 100));
-  const muteIcon = el.audio.muted ? "▯" : "▮";
-  el.mute.textContent = muteIcon;
-  el.npMute.textContent = muteIcon;
+  const muted = el.audio.muted;
+  setIcon(el.mute, muted ? "mute" : "volume");
+  setIcon(el.npMute, muted ? "mute" : "volume");
   syncLyric();
 }
 
@@ -350,6 +377,9 @@ function openNowPlaying() {
   el.nowplaying.hidden = false;
   document.body.classList.add("np-open");
   startSpectrum();
+  requestAnimationFrame(() => {
+    if (state.lyricsFollow) scrollToActive();
+  });
 }
 
 function closeNowPlaying() {
@@ -577,6 +607,8 @@ async function saveEditor(event) {
 async function loadLyrics(trackId) {
   state.lyrics = null;
   state.lyricLines = [];
+  state.lyricsFollow = true;
+  el.lyricsFollow.hidden = true;
   try {
     const data = await API.get(`lyrics/${trackId}`);
     state.lyrics = data.lyrics;
@@ -588,8 +620,15 @@ async function loadLyrics(trackId) {
 
 function renderLyrics() {
   const box = el.npLyrics;
+  const hasText = Boolean(
+    state.lyrics && ((state.lyrics.synced || "").trim() || (state.lyrics.plain || "").trim())
+  );
+  el.npBody.classList.toggle("with-lyrics", hasText);
+  if (!hasText) {
+    el.lyricsFollow.hidden = true;
+  }
   if (!state.lyrics) {
-    box.innerHTML = '<div class="lyrics-empty">Текста нет — нажмите ☰, чтобы добавить.</div>';
+    box.innerHTML = '<div class="lyrics-empty">Текста нет — нажмите кнопку текста внизу.</div>';
     return;
   }
   const synced = state.lyrics.synced;
@@ -606,12 +645,24 @@ function renderLyrics() {
     }
     state.lyricLines = lines;
     box.innerHTML = lines
-      .map((line) => `<div class="lyric-line">${escapeHtml(line.text || "♪")}</div>`)
+      .map((line) => `<div class="lyric-line" data-time="${line.time}">${escapeHtml(line.text || "♪")}</div>`)
       .join("");
     syncLyric();
+    if (state.lyricsFollow) requestAnimationFrame(scrollToActive);
   } else {
     box.innerHTML = `<div class="lyrics-plain">${escapeHtml(state.lyrics.plain || "")}</div>`;
   }
+}
+
+function scrollToActive() {
+  const active = el.npLyrics.querySelector(".lyric-line.active");
+  if (active) active.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+function setFollow(value) {
+  state.lyricsFollow = value;
+  el.lyricsFollow.hidden = value;
+  if (value) scrollToActive();
 }
 
 function syncLyric() {
@@ -624,7 +675,7 @@ function syncLyric() {
   }
   const nodes = el.npLyrics.querySelectorAll(".lyric-line");
   nodes.forEach((node, i) => node.classList.toggle("active", i === index));
-  if (nodes[index] && !el.nowplaying.hidden) {
+  if (nodes[index] && !el.nowplaying.hidden && state.lyricsFollow) {
     nodes[index].scrollIntoView({ block: "center", behavior: "smooth" });
   }
 }
@@ -754,9 +805,9 @@ el.mute.addEventListener("click", () => {
 });
 
 el.now.addEventListener("click", openNowPlaying);
-el.npClose.addEventListener("click", closeNowPlaying);
+el.npClose?.addEventListener("click", closeNowPlaying);
 el.nowplaying.addEventListener("click", (event) => {
-  if (event.target === el.nowplaying) closeNowPlaying();
+  if (event.target === el.nowplaying || event.target === el.npBackdrop) closeNowPlaying();
 });
 
 el.npPlay.addEventListener("click", togglePlay);
@@ -793,6 +844,16 @@ el.lyricsCancel.addEventListener("click", closeLyricsEditor);
 el.lyricsClear.addEventListener("click", clearLyrics);
 el.lyricsModal.addEventListener("click", (event) => {
   if (event.target === el.lyricsModal) closeLyricsEditor();
+});
+
+el.lyricsFollow.addEventListener("click", () => setFollow(true));
+el.npLyrics.addEventListener("wheel", () => setFollow(false), { passive: true });
+el.npLyrics.addEventListener("touchmove", () => setFollow(false), { passive: true });
+el.npLyrics.addEventListener("click", (event) => {
+  const line = event.target.closest(".lyric-line");
+  if (!line || line.dataset.time === undefined) return;
+  el.audio.currentTime = Number(line.dataset.time);
+  syncLyric();
 });
 
 document.addEventListener("keydown", (event) => {
