@@ -331,6 +331,10 @@ class Handler(BaseHTTPRequestHandler):
             self._fetch_lyrics(int(lyrics_fetch.group(1)))
             return
 
+        if path == "/api/album-cover":
+            self._album_cover()
+            return
+
         if path == "/api/playlists":
             payload = self._read_json()
             name = str(payload.get("name", "")).strip()
@@ -577,8 +581,24 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlparse(self.path).path)
         match = re.match(r"^/api/folders/(\d+)$", path)
         if match:
-            removed = self.context.library.remove_folder(int(match.group(1)))
-            self._json({"ok": True, "removed": removed})
+            folder_id = int(match.group(1))
+            folders = self.context.library.folders()
+            target = next((item for item in folders if int(item["id"]) == folder_id), None)
+            removed = self.context.library.remove_folder(folder_id)
+            rescanning = False
+            if target is not None:
+                lowered = str(target["path"]).rstrip("\\/").lower() + "\\"
+                ancestors = [
+                    item
+                    for item in self.context.library.folders()
+                    if lowered.startswith(str(item["path"]).rstrip("\\/").lower() + "\\")
+                ]
+                ancestors.sort(key=lambda item: len(str(item["path"])), reverse=True)
+                for item in ancestors:
+                    if self.context.start_scan(item["path"]):
+                        rescanning = True
+                        break
+            self._json({"ok": True, "removed": removed, "rescanning": rescanning})
             return
         lyrics_match = re.match(r"^/api/lyrics/(\d+)$", path)
         if lyrics_match:
@@ -602,6 +622,70 @@ class Handler(BaseHTTPRequestHandler):
         self._error(404, "not found")
 
     # ----------------------------------------------------------------- parts
+    def _cover_picture(self, raw: str):
+        """Validate a data URL and build a front-cover Picture, or raise ValueError."""
+        if not raw:
+            raise ValueError("cover data required")
+        try:
+            data = base64.b64decode(raw.split(",")[-1])
+        except Exception as exc:
+            raise ValueError("bad cover data") from exc
+        if len(data) > 12_000_000:
+            raise ValueError("cover too large")
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(data)) as probe:
+                probe.verify()
+        except Exception as exc:
+            raise ValueError("not an image") from exc
+        return make_picture(0, data, type=3, desc="Cover", source="file")
+
+    def _album_cover(self) -> None:
+        """Replace or remove the cover of every track in one album, keeping tags."""
+        from pathlib import Path
+
+        library = self.context.library
+        payload = self._read_json()
+        album = str(payload.get("album") or "").strip()
+        artist = str(payload.get("album_artist") or payload.get("artist") or "").strip()
+        if not album:
+            self._error(400, "album required")
+            return
+        action = str(payload.get("action") or "set")
+        if action not in {"set", "remove"}:
+            self._error(400, "unsupported action")
+            return
+        keep = None
+        if action == "set":
+            try:
+                keep = self._cover_picture(str(payload.get("cover") or ""))
+            except ValueError as exc:
+                status = 413 if str(exc) == "cover too large" else 400
+                self._error(status, str(exc))
+                return
+
+        tracks = library.album_tracks(album, artist)
+        if not tracks:
+            self._error(404, "no tracks in album")
+            return
+
+        updated = 0
+        failed = 0
+        for track in tracks:
+            source = Path(track["path"])
+            if not source.exists():
+                failed += 1
+                continue
+            try:
+                report = inspect_file(source)
+                clean_file(source, keep=keep, metadata=report.fields)
+                refresh_track(library, self.context.thumbs, source)
+                updated += 1
+            except Exception:
+                failed += 1
+        self._json({"updated": updated, "failed": failed})
+
     def _update_track(self, track_id: int) -> None:
         from pathlib import Path
 
@@ -626,27 +710,12 @@ class Handler(BaseHTTPRequestHandler):
         if action == "remove":
             keep = None
         elif action == "set":
-            raw = str(payload.get("cover") or "")
-            if not raw:
-                self._error(400, "cover data required")
-                return
             try:
-                data = base64.b64decode(raw.split(",")[-1])
-            except Exception:
-                self._error(400, "bad cover data")
+                keep = self._cover_picture(str(payload.get("cover") or ""))
+            except ValueError as exc:
+                status = 413 if str(exc) == "cover too large" else 400
+                self._error(status, str(exc))
                 return
-            if len(data) > 12_000_000:
-                self._error(413, "cover too large")
-                return
-            try:
-                from PIL import Image
-
-                with Image.open(io.BytesIO(data)) as probe:
-                    probe.verify()
-            except Exception:
-                self._error(400, "not an image")
-                return
-            keep = make_picture(0, data, type=3, desc="Cover", source="file")
 
         try:
             clean_file(source, keep=keep, metadata=metadata)

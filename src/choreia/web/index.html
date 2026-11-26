@@ -164,6 +164,31 @@
   </form>
 </div>
 
+<div class="modal" id="cover-modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <div class="modal-title">Обложка альбома</div>
+      <button type="button" class="icon-btn" id="cover-close" title="Закрыть">✕</button>
+    </div>
+    <div class="modal-file" id="cover-album"></div>
+    <div class="modal-cover">
+      <div class="modal-cover-preview" id="cover-preview"></div>
+      <div class="modal-cover-actions">
+        <button type="button" class="ghost" id="cover-pick">Выбрать обложку…</button>
+        <button type="button" class="ghost" id="cover-find">Найти в интернете</button>
+        <button type="button" class="ghost" id="cover-remove">Убрать обложку</button>
+        <div class="hint" id="cover-hint">Применится ко всем трекам альбома</div>
+      </div>
+      <input type="file" id="cover-file" accept="image/*" hidden>
+    </div>
+    <div class="cover-results" id="cover-results" hidden></div>
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="cover-cancel">Отмена</button>
+      <button type="button" class="play-btn modal-save" id="cover-save">Сохранить</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="lyrics-modal" hidden>
   <form class="modal-card" id="lyrics-form">
     <div class="modal-head">

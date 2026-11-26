@@ -153,6 +153,51 @@ def test_browse_signature_changes_only_with_content(tmp_path: Path) -> None:
     library.close()
 
 
+def test_remove_nested_folder_keeps_tracks_covered_by_the_parent(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    music = tmp_path / "Music"
+    nested = music / "ximora"
+    nested.mkdir(parents=True)
+    inside = nested / "a.mp3"
+    inside.write_bytes(b"x")
+    outside = music / "b.mp3"
+    outside.write_bytes(b"x")
+    root_id = library.add_folder(music)
+    nested_id = library.add_folder(nested)
+    inside_id = library.upsert_track(path=str(inside), title="A", folder_id=nested_id)
+    outside_id = library.upsert_track(path=str(outside), title="B", folder_id=root_id)
+
+    removed = library.remove_folder(nested_id)
+
+    assert removed == 0
+    assert library.track(inside_id)["folder_id"] == root_id
+    assert library.track(outside_id)["folder_id"] == root_id
+    assert library.count_tracks() == 2
+    library.close()
+
+
+def test_remove_parent_folder_keeps_tracks_of_the_nested_root(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    music = tmp_path / "Music"
+    nested = music / "ximora"
+    nested.mkdir(parents=True)
+    inside = nested / "a.mp3"
+    inside.write_bytes(b"x")
+    outside = music / "b.mp3"
+    outside.write_bytes(b"x")
+    root_id = library.add_folder(music)
+    nested_id = library.add_folder(nested)
+    inside_id = library.upsert_track(path=str(inside), title="A", folder_id=root_id)
+    outside_id = library.upsert_track(path=str(outside), title="B", folder_id=root_id)
+
+    removed = library.remove_folder(root_id)
+
+    assert removed == 1
+    assert library.track(outside_id) is None
+    assert library.track(inside_id)["folder_id"] == nested_id
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

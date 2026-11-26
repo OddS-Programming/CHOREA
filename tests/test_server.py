@@ -478,6 +478,104 @@ def test_shared_open_allows_replacing_a_playing_file(server, tmp_path) -> None:
     assert running.context.library.track(1) is not None
 
 
+def test_album_cover_applies_and_removes_for_the_whole_album(server) -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    import helpers
+    from choreia.core import clean_file, inspect_file
+
+    running, library, track = server
+    second = helpers.copy_asset("mp3", track.parent / "second.mp3")
+    shared = {"artist": "Artist", "album": "Album", "album_artist": "Artist"}
+    clean_file(track, keep=None, metadata={**shared, "title": "One"})
+    clean_file(second, keep=None, metadata={**shared, "title": "Two"})
+    library.upsert_track(
+        path=str(track), title="One", artist="Artist", album="Album", album_artist="Artist", duration=1.0
+    )
+    library.upsert_track(
+        path=str(second), title="Two", artist="Artist", album="Album", album_artist="Artist", duration=1.0
+    )
+    buffer = io.BytesIO()
+    Image.new("RGB", (300, 300), (90, 60, 160)).save(buffer, "JPEG")
+    cover = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+    status, payload = _post(
+        running,
+        "/api/album-cover",
+        {"album": "Album", "album_artist": "Artist", "action": "set", "cover": cover},
+    )
+
+    assert status == 200
+    assert payload == {"updated": 2, "failed": 0}
+    for path in (track, second):
+        assert inspect_file(path).front_cover is not None
+
+    status, payload = _post(
+        running, "/api/album-cover", {"album": "Album", "album_artist": "Artist", "action": "remove"}
+    )
+
+    assert status == 200
+    assert payload["updated"] == 2
+    for path in (track, second):
+        assert inspect_file(path).front_cover is None
+
+
+def test_album_cover_rejects_bad_input(server) -> None:
+    running, _library, _track = server
+
+    status, payload = _post(running, "/api/album-cover", {"album": "", "action": "remove"})
+    assert status == 400
+
+    status, payload = _post(running, "/api/album-cover", {"album": "Missing", "action": "remove"})
+    assert status == 404
+
+    status, payload = _post(
+        running,
+        "/api/album-cover",
+        {"album": "Album", "action": "set", "cover": "data:image/jpeg;base64,bm90IGFuIGltYWdl"},
+    )
+    assert status == 400
+
+
+def test_removing_nested_folder_keeps_its_tracks(server, tmp_path) -> None:
+    import time
+
+    import helpers
+
+    running, library, track = server
+    music = track.parent.parent / "Music"
+    nested = music / "ximora"
+    nested.mkdir(parents=True)
+    inner = helpers.copy_asset("mp3", nested / "inner.mp3")
+    music_root = library.add_folder(music)
+    nested_root = library.add_folder(nested)
+    inner_id = library.upsert_track(path=str(inner), title="Inner", folder_id=nested_root)
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{running.port}/api/folders/{nested_root}",
+        method="DELETE",
+        headers={"X-Token": running.context.token},
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        payload = json.loads(response.read())
+
+    assert payload["removed"] == 0
+    assert payload["rescanning"] is True
+    assert library.track(inner_id) is not None
+    assert library.track(inner_id)["folder_id"] == music_root
+
+    for _ in range(60):
+        status, _headers, body = _get(
+            running, "/api/scan/status", {"X-Token": running.context.token}
+        )
+        if status == 200 and not json.loads(body)["running"]:
+            break
+        time.sleep(0.05)
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

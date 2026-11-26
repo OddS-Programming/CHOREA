@@ -16,6 +16,7 @@ const state = {
   scanTimer: null,
   editing: null,
   editCover: { action: "keep", dataUrl: null },
+  albumCover: null,
   lyrics: null,
   lyricLines: [],
   lyricIndex: -1,
@@ -104,6 +105,18 @@ const el = {
   editCoverHint: document.getElementById("edit-cover-hint"),
   editCoverFind: document.getElementById("edit-cover-find"),
   editCoverResults: document.getElementById("edit-cover-results"),
+  coverModal: document.getElementById("cover-modal"),
+  coverAlbum: document.getElementById("cover-album"),
+  coverPreview: document.getElementById("cover-preview"),
+  coverPick: document.getElementById("cover-pick"),
+  coverFind: document.getElementById("cover-find"),
+  coverRemove: document.getElementById("cover-remove"),
+  coverFile: document.getElementById("cover-file"),
+  coverHint: document.getElementById("cover-hint"),
+  coverResults: document.getElementById("cover-results"),
+  coverSave: document.getElementById("cover-save"),
+  coverCancel: document.getElementById("cover-cancel"),
+  coverClose: document.getElementById("cover-close"),
   editCoverAlbum: document.getElementById("edit-cover-album"),
   editMultiHint: document.getElementById("edit-multi-hint"),
   askModal: document.getElementById("ask-modal"),
@@ -327,6 +340,10 @@ function playTrack(id, record = true) {
   state.queueIndex = state.queue.indexOf(id);
   state.currentId = id;
   el.audio.src = API.media(id);
+  // Build the WebAudio graph once, before the first sound, so opening the
+  // full-screen view later never reroutes the element and never causes a gap.
+  ensureAudioGraph();
+  if (audioContext?.state === "suspended") audioContext.resume().catch(() => {});
   el.audio.play().catch(() => {});
   updateNow(track);
   loadLyrics(id);
@@ -552,10 +569,15 @@ async function removeFolder(folderId) {
   );
   if (!agreed) return;
   try {
-    await API.del(`folders/${folderId}`);
-    toast("Папка убрана из библиотеки");
+    const result = await API.del(`folders/${folderId}`);
+    toast(
+      result.rescanning
+        ? "Папка убрана, треки из вложенных папок возвращаются в библиотеку"
+        : "Папка убрана из библиотеки"
+    );
     await loadTracks();
-    renderFolders();
+    await renderFolders();
+    if (result.rescanning) pollScan();
   } catch (error) {
     toast(`Не удалось убрать папку: ${error.message}`);
   }
@@ -725,6 +747,7 @@ function renderCollection() {
   const parts = [`<div class="playlist-toolbar">
     ${collection.parent ? '<button class="ghost" id="collection-back">← Назад</button>' : ""}
     ${collection.kind === "folder" ? '<button class="ghost" id="folder-new">＋ Новая папка</button><button class="ghost" id="folder-upload">＋ Добавить трек</button>' : ""}
+    ${collection.kind === "album" ? '<button class="ghost" id="album-cover">Обложка альбома</button>' : ""}
     <span class="hint">${counts.join(" · ")}</span>
   </div>`, '<div class="scroll">'];
   for (const folder of collection.folders || []) parts.push(folderRow(folder));
@@ -915,7 +938,7 @@ async function refreshCurrentView() {
   if (refreshing) return;
   if (document.hidden) return;
   if (state.selection.size) return;
-  if (!el.askModal.hidden || !el.editModal.hidden || !el.lyricsModal.hidden) return;
+  if (!el.askModal.hidden || !el.editModal.hidden || !el.lyricsModal.hidden || !el.coverModal.hidden) return;
 
   const scroller = () => document.querySelector("#view .scroll, #view .list-body");
   const top = scroller()?.scrollTop || 0;
@@ -1125,30 +1148,20 @@ function setEditCoverPreview(url) {
   el.editCoverPreview.style.backgroundImage = url ? `url("${url}")` : "";
 }
 
-async function findCoverOnline() {
-  const track = state.editing;
-  if (!track) return;
-  const field = (key) => {
-    const input = el.editFields.querySelector(`input[data-key="${key}"]`);
-    const typed = input ? input.value.trim() : "";
-    return typed || String(track[key] || "");
-  };
-  el.editCoverResults.hidden = false;
-  el.editCoverResults.innerHTML = '<div class="hint">Ищу обложки в интернете…</div>';
-  el.editCoverFind.disabled = true;
-  el.editCoverFind.textContent = "Ищу…";
+async function runCoverSearch({ artist, album, title, results, hint, button }) {
+  results.hidden = false;
+  results.innerHTML = '<div class="hint">Ищу обложки в интернете…</div>';
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "Ищу…";
   try {
-    const data = await API.get("cover-search", {
-      artist: field("artist"),
-      album: field("album"),
-      title: field("title"),
-    });
+    const data = await API.get("cover-search", { artist, album, title });
     if (!data.results.length) {
-      el.editCoverResults.innerHTML =
+      results.innerHTML =
         '<div class="hint">Ничего не нашлось. Заполните исполнителя и альбом и попробуйте снова.</div>';
       return;
     }
-    el.editCoverResults.innerHTML = data.results
+    results.innerHTML = data.results
       .map(
         (item) => `
       <button type="button" class="cover-choice" data-key="${item.key}"
@@ -1158,15 +1171,33 @@ async function findCoverOnline() {
       </button>`
       )
       .join("");
-    el.editCoverResults.scrollTop = 0;
-    el.editCoverHint.textContent = "Ваша обложка главнее — найденная применится, только если выбрать её.";
+    results.scrollTop = 0;
+    hint.textContent = "Ваша обложка главнее — найденная применится, только если выбрать её.";
   } catch (error) {
-    el.editCoverResults.innerHTML =
+    results.innerHTML =
       '<div class="hint">Не удалось получить обложки. Проверьте подключение к интернету.</div>';
   } finally {
-    el.editCoverFind.disabled = false;
-    el.editCoverFind.textContent = "Найти в интернете";
+    button.disabled = false;
+    button.textContent = label || "Найти в интернете";
   }
+}
+
+async function findCoverOnline() {
+  const track = state.editing;
+  if (!track) return;
+  const field = (key) => {
+    const input = el.editFields.querySelector(`input[data-key="${key}"]`);
+    const typed = input ? input.value.trim() : "";
+    return typed || String(track[key] || "");
+  };
+  await runCoverSearch({
+    artist: field("artist"),
+    album: field("album"),
+    title: field("title"),
+    results: el.editCoverResults,
+    hint: el.editCoverHint,
+    button: el.editCoverFind,
+  });
 }
 
 async function pickOnlineCover(key, button) {
@@ -1189,6 +1220,107 @@ function closeEditor() {
   state.editTracks = [];
   state.editBaseline = {};
   state.editCover = { action: "keep", dataUrl: null };
+}
+
+/* ------------------------------------------------------------ album cover */
+function openAlbumCover() {
+  if (state.view !== "album" || !state.collection?.album) {
+    toast("Откройте альбом, чтобы сменить его обложку");
+    return;
+  }
+  const tracks = state.collection.tracks || [];
+  state.albumCover = {
+    album: state.collection.album,
+    artist: state.collection.artist || "",
+    tracks,
+    action: "keep",
+    dataUrl: null,
+  };
+  const subtitle = state.collection.artist ? ` — ${state.collection.artist}` : "";
+  el.coverAlbum.textContent = `${state.collection.album}${subtitle} · треков: ${tracks.length}`;
+  el.coverFile.value = "";
+  el.coverResults.hidden = true;
+  el.coverResults.innerHTML = "";
+  const preview = tracks.find((track) => track.cover_hash);
+  setCoverDialogPreview(preview ? API.thumb(preview.cover_hash, 320) : "");
+  el.coverHint.textContent = tracks.length
+    ? "Применится ко всем трекам альбома"
+    : "В альбоме нет треков";
+  el.coverSave.disabled = !tracks.length;
+  el.coverModal.hidden = false;
+}
+
+function closeAlbumCover() {
+  el.coverModal.hidden = true;
+  el.coverResults.hidden = true;
+  el.coverResults.innerHTML = "";
+  state.albumCover = null;
+}
+
+function setCoverDialogPreview(url) {
+  el.coverPreview.style.backgroundImage = url ? `url("${url}")` : "";
+}
+
+async function findAlbumCover() {
+  const albumCover = state.albumCover;
+  if (!albumCover) return;
+  await runCoverSearch({
+    artist: albumCover.artist,
+    album: albumCover.album,
+    title: albumCover.tracks[0]?.title || "",
+    results: el.coverResults,
+    hint: el.coverHint,
+    button: el.coverFind,
+  });
+}
+
+async function pickAlbumCover(key, button) {
+  const albumCover = state.albumCover;
+  if (!albumCover) return;
+  try {
+    const data = await API.get(`cover/${key}`);
+    albumCover.action = "set";
+    albumCover.dataUrl = data.cover;
+    setCoverDialogPreview(data.cover);
+    el.coverResults
+      .querySelectorAll(".cover-choice")
+      .forEach((node) => node.classList.toggle("active", node === button));
+    el.coverHint.textContent = "Обложка применится ко всем трекам альбома после «Сохранить».";
+  } catch (error) {
+    toast("Не удалось загрузить обложку");
+  }
+}
+
+async function saveAlbumCover() {
+  const albumCover = state.albumCover;
+  if (!albumCover) return;
+  if (albumCover.action === "keep") {
+    closeAlbumCover();
+    return;
+  }
+  el.coverSave.disabled = true;
+  el.coverSave.textContent = "Сохраняю…";
+  try {
+    const payload = {
+      album: albumCover.album,
+      album_artist: albumCover.artist,
+      action: albumCover.action,
+    };
+    if (albumCover.action === "set") payload.cover = albumCover.dataUrl;
+    const result = await API.post("album-cover", payload);
+    closeAlbumCover();
+    await refreshAfterEdit();
+    toast(
+      result.failed
+        ? `Обложка обновлена: ${result.updated}, ошибок: ${result.failed}`
+        : `Обложка применена: ${result.updated} треков`
+    );
+  } catch (error) {
+    toast(`Не удалось записать обложку: ${error.message}`);
+  } finally {
+    el.coverSave.disabled = false;
+    el.coverSave.textContent = "Сохранить";
+  }
 }
 
 async function saveEditor(event) {
@@ -1525,6 +1657,10 @@ el.view.addEventListener("click", async (event) => {
     await folderBack();
     return;
   }
+  if (event.target.id === "album-cover") {
+    openAlbumCover();
+    return;
+  }
   if (event.target.id === "folder-new") {
     await createFolder();
     return;
@@ -1706,6 +1842,45 @@ el.editCoverResults.addEventListener("click", (event) => {
   const choice = event.target.closest("[data-key]");
   if (choice) pickOnlineCover(choice.dataset.key, choice);
 });
+
+el.coverFind.addEventListener("click", findAlbumCover);
+el.coverResults.addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-key]");
+  if (choice) pickAlbumCover(choice.dataset.key, choice);
+});
+el.coverPick.addEventListener("click", () => el.coverFile.click());
+el.coverRemove.addEventListener("click", () => {
+  if (!state.albumCover) return;
+  state.albumCover.action = "remove";
+  state.albumCover.dataUrl = null;
+  setCoverDialogPreview("");
+  el.coverResults.querySelectorAll(".cover-choice").forEach((node) => node.classList.remove("active"));
+  el.coverHint.textContent = "Обложка будет удалена у всех треков альбома";
+});
+el.coverFile.addEventListener("change", () => {
+  const file = el.coverFile.files && el.coverFile.files[0];
+  if (!file || !state.albumCover) return;
+  if (file.size > 12_000_000) {
+    toast("Файл больше 12 МБ — уменьшите обложку");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = String(reader.result);
+    state.albumCover.action = "set";
+    state.albumCover.dataUrl = dataUrl;
+    setCoverDialogPreview(dataUrl);
+    el.coverResults.querySelectorAll(".cover-choice").forEach((node) => node.classList.remove("active"));
+    el.coverHint.textContent = file.name;
+  };
+  reader.readAsDataURL(file);
+});
+el.coverSave.addEventListener("click", saveAlbumCover);
+el.coverCancel.addEventListener("click", closeAlbumCover);
+el.coverClose.addEventListener("click", closeAlbumCover);
+el.coverModal.addEventListener("click", (event) => {
+  if (event.target === el.coverModal) closeAlbumCover();
+});
 el.editModal.addEventListener("click", (event) => {
   if (event.target === el.editModal) closeEditor();
 });
@@ -1813,6 +1988,7 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "KeyL") toggleLyrics();
   if (event.code === "Escape") {
     if (!el.askModal.hidden) closeAsk(state.askMode === "text" ? null : false);
+    else if (!el.coverModal.hidden) closeAlbumCover();
     else if (!el.lyricsModal.hidden) closeLyricsEditor();
     else if (!el.editModal.hidden) closeEditor();
     else closeNowPlaying();

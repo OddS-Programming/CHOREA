@@ -382,17 +382,41 @@ class Library:
         return [dict(row) for row in rows]
 
     def remove_folder(self, folder_id: int) -> int:
-        """Forget a folder and every track under it. Files on disk are untouched."""
+        """Forget a folder, keeping tracks that still belong to another library root."""
         with self._lock:
             row = self._conn.execute("SELECT path FROM folders WHERE id=?", (folder_id,)).fetchone()
             if row is None:
                 return 0
             prefix = str(row["path"]).rstrip("\\/") + "\\"
-            cursor = self._conn.execute("DELETE FROM tracks WHERE path LIKE ?", (prefix + "%",))
-            removed = cursor.rowcount
+            remaining = self._conn.execute(
+                "SELECT id, path FROM folders WHERE id<>?", (folder_id,)
+            ).fetchall()
+            roots = [
+                (int(item["id"]), str(item["path"]).rstrip("\\/") + "\\") for item in remaining
+            ]
+            rows = self._conn.execute(
+                "SELECT id, path FROM tracks WHERE path LIKE ?", (prefix + "%",)
+            ).fetchall()
+
+            kept: list[tuple[int, int]] = []
+            for track in rows:
+                lowered = str(track["path"]).lower()
+                owner: tuple[int, int] | None = None
+                for root_id, root_prefix in roots:
+                    root_lower = root_prefix.lower()
+                    if lowered.startswith(root_lower) and (owner is None or len(root_prefix) > owner[1]):
+                        owner = (root_id, len(root_prefix))
+                if owner is not None:
+                    kept.append((int(track["id"]), owner[0]))
+                else:
+                    self._conn.execute("DELETE FROM tracks WHERE id=?", (int(track["id"]),))
+            for track_id, root_id in kept:
+                self._conn.execute(
+                    "UPDATE tracks SET folder_id=? WHERE id=?", (root_id, track_id)
+                )
             self._conn.execute("DELETE FROM folders WHERE id=?", (folder_id,))
             self._conn.commit()
-        return removed
+        return len(rows) - len(kept)
 
     # ---------------------------------------------------------------- lyrics
     def lyrics(self, track_id: int) -> dict | None:
