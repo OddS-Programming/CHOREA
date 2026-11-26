@@ -11,8 +11,8 @@ import helpers
 
 @pytest.fixture(scope="session")
 def tk_root():
-    # A single root per process: creating a second Tk() after destroying the
-    # first one breaks Tcl's library lookup on Windows.
+    # One root per process: a second Tk() after the first is destroyed breaks
+    # Tcl's library lookup on Windows.
     try:
         root = tk.Tk()
     except tk.TclError as exc:  # pragma: no cover - only on a headless machine
@@ -36,18 +36,43 @@ def window(tk_root: tk.Tk):
 
 
 def test_window_builds(window: App) -> None:
-    assert window.file_tree is not None
+    assert window.track_list is not None
     assert set(window.vars) == {"title", "artist", "album", "album_artist", "track", "disc", "year", "genre"}
 
 
-def test_adding_a_file_shows_its_covers(window: App, tmp_path: Path, asset) -> None:
+def test_adding_a_file_shows_it_in_the_list(window: App, tmp_path: Path, asset) -> None:
     path = asset("mp3", tmp_path / "tone.mp3")
     helpers.add_mp3_pictures(path)
 
     window.add_paths([path])
 
-    assert len(window.reports) == 1
-    assert window.chosen is not None
-    assert window.chosen.type == 3
-    assert len(window.picture_tree.get_children()) == 3
+    assert len(window.order) == 1
+    assert len(window.track_list.reports) == 1
+    assert window.current is not None
+    assert window.chosen is not None and window.chosen.type == 3
     assert window.vars["title"].get() == "Original title"
+
+
+def test_open_folder_lists_every_track(window: App, tmp_path: Path, asset) -> None:
+    folder = tmp_path / "album"
+    folder.mkdir()
+    helpers.copy_asset("mp3", folder / "01-song.mp3")
+    helpers.copy_asset("flac", folder / "02-song.flac")
+
+    window.load_folder(folder)
+
+    assert len(window.order) == 2
+    assert len(window.track_list.reports) == 2
+
+
+def test_search_filters_the_list(window: App, tmp_path: Path, asset) -> None:
+    folder = tmp_path / "album"
+    folder.mkdir()
+    helpers.copy_asset("mp3", folder / "alpha.mp3")
+    helpers.copy_asset("mp3", folder / "beta.mp3")
+    window.load_folder(folder)
+
+    window.search_var.set("alpha")
+
+    assert len(window.track_list.reports) == 1
+    assert window.track_list.reports[0].path.name == "alpha.mp3"

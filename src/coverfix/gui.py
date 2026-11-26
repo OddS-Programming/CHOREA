@@ -1,21 +1,42 @@
-"""Desktop window: drop files, see every cover, keep one."""
+"""Desktop window: pick a folder, see every track as a row, fix covers."""
 
 from __future__ import annotations
 
 import io
 import sys
+import tkinter as tk
 import traceback
 from pathlib import Path
-from tkinter import BOTH, END, LEFT, RIGHT, X, Y, BooleanVar, StringVar, Tk, filedialog, messagebox
-from tkinter import ttk
+from tkinter import filedialog, messagebox
 
-from PIL import Image, ImageTk
+from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 from .core import UnsupportedFormat, clean_file, inspect_file
 from .model import FIELD_LABELS, FileReport, Picture, make_picture
 
-PREVIEW_SIZE = (240, 240)
 AUDIO_SUFFIXES = {".mp3", ".flac", ".m4a", ".m4b", ".mp4", ".ogg", ".oga", ".opus", ".aac"}
+
+BG = "#0B0B0D"
+SURFACE = "#141417"
+SURFACE_2 = "#1B1B20"
+HOVER = "#17171C"
+SELECTED = "#27272F"
+TEXT = "#F2F2F5"
+MUTED = "#9A9AA3"
+DIM = "#6E6E78"
+ACCENT = "#8B5CF6"
+ACCENT_HOVER = "#7C3AED"
+BORDER = "#26262D"
+
+ROW_HEIGHT = 64
+THUMB_SIZE = 48
+DETAIL_COVER = 170
+
+FONT_TITLE = ("Segoe UI", 11, "bold")
+FONT_BODY = ("Segoe UI", 10)
+FONT_SMALL = ("Segoe UI", 9)
+FONT_HEAD = ("Segoe UI", 15, "bold")
+FONT_MONO = ("Consolas", 9)
 
 
 def _enable_dpi_awareness() -> None:
@@ -29,233 +50,612 @@ def _enable_dpi_awareness() -> None:
         pass
 
 
+def _cover_image(data: bytes | None, size: int, radius: int = 8, background: str = SURFACE) -> Image.Image:
+    if data:
+        try:
+            image = Image.open(io.BytesIO(data)).convert("RGB")
+            image = ImageOps.fit(image, (size, size), Image.LANCZOS)
+        except Exception:
+            image = None
+    else:
+        image = None
+
+    if image is None:
+        image = Image.new("RGB", (size, size), "#232330")
+        draw = ImageDraw.Draw(image)
+        centre = size / 2
+        for radius_ring, colour in ((size * 0.34, "#34344a"), (size * 0.16, "#3d3d58"), (size * 0.05, "#4a4a6a")):
+            draw.ellipse(
+                (centre - radius_ring, centre - radius_ring, centre + radius_ring, centre + radius_ring),
+                outline=colour,
+                width=max(2, size // 32),
+            )
+
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size - 1, size - 1), radius=radius, fill=255)
+    canvas = Image.new("RGB", (size, size), background)
+    canvas.paste(image, (0, 0), mask)
+    return canvas
+
+
+def _ellipsize(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def _duration(seconds: float | int | None) -> str:
+    if not seconds:
+        return ""
+    total = max(1, int(round(float(seconds))))
+    return f"{total // 60}:{total % 60:02d}"
+
+
+class SlimScrollbar(tk.Canvas):
+    """A quiet scrollbar that matches the dark surface instead of the OS theme."""
+
+    def __init__(self, master: tk.Misc, command) -> None:  # noqa: ANN001
+        super().__init__(master, width=9, bg=BG, highlightthickness=0, bd=0)
+        self._command = command
+        self._first = 0.0
+        self._last = 1.0
+        self.bind("<Configure>", lambda _event: self._redraw())
+        self.bind("<Button-1>", self._on_press)
+        self.bind("<B1-Motion>", self._on_drag)
+
+    def set(self, first: str, last: str) -> None:
+        self._first = float(first)
+        self._last = float(last)
+        self._redraw()
+
+    def _redraw(self) -> None:
+        self.delete("thumb")
+        height = self.winfo_height()
+        span = self._last - self._first
+        if height <= 1 or span >= 0.999:
+            return
+        size = max(30.0, span * height)
+        top = min(self._first * height, height - size)
+        self.create_rectangle(2, top, 7, top + size, fill=SURFACE_2, outline="", tags="thumb")
+
+    def _on_press(self, event: tk.Event) -> None:  # noqa: ANN001
+        height = self.winfo_height()
+        if height > 1:
+            self._command("moveto", min(max(event.y / height, 0.0), 1.0))
+
+    def _on_drag(self, event: tk.Event) -> None:  # noqa: ANN001
+        self._on_press(event)
+
+
+class TrackList(tk.Canvas):
+    """Canvas-drawn list: one row per track with cover, title, artist, length."""
+
+    def __init__(self, master: tk.Misc, on_select) -> None:  # noqa: ANN001
+        super().__init__(master, bg=BG, highlightthickness=0, bd=0)
+        self.on_select = on_select
+        self.reports: list[FileReport] = []
+        self._photos: list[ImageTk.PhotoImage] = []
+        self._rows: list[dict] = []
+        self._hover = -1
+        self._selected = -1
+        self._placeholder = ImageTk.PhotoImage(_cover_image(None, THUMB_SIZE, 8, BG))
+
+        self.bind("<Configure>", lambda _event: self._layout())
+        self.bind("<Motion>", self._on_motion)
+        self.bind("<Leave>", lambda _event: self._set_hover(-1))
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<MouseWheel>", self._on_wheel)
+
+    # ------------------------------------------------------------------ data
+    def set_reports(self, reports: list[FileReport]) -> None:
+        self.reports = reports
+        self._selected = 0 if reports else -1
+        self._hover = -1
+        self._build()
+
+    def select(self, index: int) -> None:
+        if not 0 <= index < len(self.reports):
+            return
+        self._selected = index
+        self._refresh_states()
+        self.on_select(self.reports[index])
+
+    # --------------------------------------------------------------- drawing
+    def _build(self) -> None:
+        self.delete("all")
+        self._rows.clear()
+        self._photos.clear()
+
+        if not self.reports:
+            self._draw_empty()
+            self.configure(scrollregion=(0, 0, 0, 0))
+            return
+
+        width = max(self.winfo_width(), 200)
+        for index, report in enumerate(self.reports):
+            top = index * ROW_HEIGHT
+            hover = self.create_rectangle(0, top, width, top + ROW_HEIGHT, fill=HOVER, outline="")
+            selected = self.create_rectangle(0, top, width, top + ROW_HEIGHT, fill=SELECTED, outline="")
+            photo = self._photo_for(report)
+            image = self.create_image(16, top + (ROW_HEIGHT - THUMB_SIZE) // 2, image=photo, anchor="nw")
+            title = self.create_text(
+                16 + THUMB_SIZE + 14,
+                top + 20,
+                text="",
+                anchor="w",
+                fill=TEXT,
+                font=FONT_TITLE,
+            )
+            artist = self.create_text(
+                16 + THUMB_SIZE + 14,
+                top + 41,
+                text="",
+                anchor="w",
+                fill=MUTED,
+                font=FONT_SMALL,
+            )
+            length = self.create_text(width - 18, top + ROW_HEIGHT // 2, text="", anchor="e", fill=DIM, font=FONT_MONO)
+            badge = self.create_text(width - 66, top + ROW_HEIGHT // 2, text="", anchor="e", fill=ACCENT, font=FONT_SMALL)
+            self._rows.append(
+                {
+                    "hover": hover,
+                    "selected": selected,
+                    "image": image,
+                    "title": title,
+                    "artist": artist,
+                    "length": length,
+                    "badge": badge,
+                }
+            )
+
+        self.configure(scrollregion=(0, 0, width, len(self.reports) * ROW_HEIGHT))
+        self._layout()
+        self._refresh_states()
+
+    def _draw_empty(self) -> None:
+        width = max(self.winfo_width(), 400)
+        height = max(self.winfo_height(), 300)
+        self.create_text(
+            width // 2,
+            height // 2 - 16,
+            text="Откройте папку с треками",
+            fill=MUTED,
+            font=("Segoe UI", 13),
+        )
+        self.create_text(
+            width // 2,
+            height // 2 + 14,
+            text="Ctrl+O или кнопка «Открыть папку», либо перетащите файлы в окно",
+            fill=DIM,
+            font=FONT_SMALL,
+        )
+
+    def _photo_for(self, report: FileReport) -> ImageTk.PhotoImage:
+        cover = report.front_cover
+        if cover is None:
+            self._photos.append(self._placeholder)
+            return self._placeholder
+        photo = ImageTk.PhotoImage(_cover_image(cover.data, THUMB_SIZE, 8, BG))
+        self._photos.append(photo)
+        return photo
+
+    def _layout(self) -> None:
+        width = max(self.winfo_width(), 200)
+        limit = max(18, int((width - THUMB_SIZE - 130) / 7.2))
+        for report, row in zip(self.reports, self._rows):
+            title = report.fields.get("title") or report.path.stem
+            artist = report.fields.get("artist") or "—"
+            self.itemconfigure(row["title"], text=_ellipsize(title, limit))
+            self.itemconfigure(row["artist"], text=_ellipsize(artist, limit))
+            self.itemconfigure(row["length"], text=_duration(report.audio.get("duration")))
+            covers = len(report.pictures)
+            self.itemconfigure(row["badge"], text=f"{covers}" if covers != 1 else "")
+            self.coords(row["selected"], 0, 0, width, 0)
+            self.coords(row["hover"], 0, 0, width, 0)
+        for index, row in enumerate(self._rows):
+            top = index * ROW_HEIGHT
+            self.coords(row["hover"], 0, top, width, top + ROW_HEIGHT)
+            self.coords(row["selected"], 0, top, width, top + ROW_HEIGHT)
+            self.coords(row["image"], 16, top + (ROW_HEIGHT - THUMB_SIZE) // 2)
+            self.coords(row["title"], 16 + THUMB_SIZE + 14, top + 20)
+            self.coords(row["artist"], 16 + THUMB_SIZE + 14, top + 41)
+            self.coords(row["length"], width - 18, top + ROW_HEIGHT // 2)
+            self.coords(row["badge"], width - 62, top + ROW_HEIGHT // 2)
+
+    def _refresh_states(self) -> None:
+        for index, row in enumerate(self._rows):
+            self.itemconfigure(row["hover"], state="normal" if index == self._hover and index != self._selected else "hidden")
+            self.itemconfigure(row["selected"], state="normal" if index == self._selected else "hidden")
+            self.tag_raise(row["hover"])
+            self.tag_raise(row["selected"])
+            for key in ("image", "title", "artist", "length", "badge"):
+                self.tag_raise(row[key])
+
+    # ----------------------------------------------------------------- events
+    def _index_at(self, y: int) -> int:
+        if not self.reports:
+            return -1
+        index = int(y // ROW_HEIGHT)
+        return index if 0 <= index < len(self.reports) else -1
+
+    def _on_motion(self, event: tk.Event) -> None:  # noqa: ANN001
+        index = self._index_at(int(self.canvasy(event.y)))
+        self._set_hover(index)
+        self.configure(cursor="hand2" if index >= 0 else "")
+
+    def _set_hover(self, index: int) -> None:
+        if index == self._hover:
+            return
+        self._hover = index
+        self._refresh_states()
+
+    def _on_click(self, event: tk.Event) -> None:  # noqa: ANN001
+        index = self._index_at(int(self.canvasy(event.y)))
+        if index >= 0:
+            self.select(index)
+
+    def _on_wheel(self, event: tk.Event) -> None:  # noqa: ANN001
+        self.yview_scroll(int(-event.delta / 120), "units")
+
+
 class App:
-    def __init__(self, root: Tk, dnd_available: bool) -> None:
+    def __init__(self, root: tk.Misc, dnd_available: bool) -> None:
         self.root = root
         self.dnd_available = dnd_available
         self.reports: dict[Path, FileReport] = {}
-        self.pictures: list[Picture] = []
+        self.order: list[Path] = []
+        self.current: FileReport | None = None
         self.chosen: Picture | None = None
-        self._photo: ImageTk.PhotoImage | None = None
+        self._detail_photo: ImageTk.PhotoImage | None = None
+        self._cover_photos: list[ImageTk.PhotoImage] = []
 
-        self.root.title("CoverFix — одна обложка, чистые теги")
-        self.root.geometry("1000x680")
-        self.root.minsize(860, 560)
+        if isinstance(root, tk.Tk):
+            root.title("CoverFix")
+            root.geometry("1180x760")
+            root.minsize(920, 600)
+            root.configure(bg=BG)
 
-        self._build_toolbar()
+        self._build_header()
         self._build_body()
-        self._build_log()
         self._build_status()
 
+        if isinstance(root, tk.Tk):
+            root.bind("<Control-o>", lambda _event: self.open_folder())
+            root.bind("<Control-O>", lambda _event: self.open_folder())
         if dnd_available:
             self._enable_drop()
 
-    # ---------------------------------------------------------------- layout
-    def _build_toolbar(self) -> None:
-        bar = ttk.Frame(self.root, padding=(10, 10, 10, 4))
-        bar.pack(fill=X)
-        ttk.Button(bar, text="Добавить файлы…", command=self.add_files_dialog).pack(side=LEFT)
-        ttk.Button(bar, text="Обновить", command=self.refresh_current).pack(side=LEFT, padx=(6, 0))
-        ttk.Button(bar, text="Убрать из списка", command=self.remove_selected).pack(side=LEFT, padx=(6, 0))
+    # ---------------------------------------------------------------- chrome
+    def _build_header(self) -> None:
+        header = tk.Frame(self.root, bg=BG)
+        header.pack(fill="x", padx=18, pady=(16, 6))
 
-        ttk.Separator(bar, orient="vertical").pack(side=LEFT, fill=Y, padx=12)
+        brand = tk.Frame(header, bg=BG)
+        brand.pack(side="left")
+        tk.Label(brand, text="CoverFix", bg=BG, fg=TEXT, font=FONT_HEAD).pack(anchor="w")
+        tk.Label(
+            brand,
+            text="обложки и теги без сюрпризов",
+            bg=BG,
+            fg=DIM,
+            font=FONT_SMALL,
+        ).pack(anchor="w")
 
-        ttk.Button(bar, text="Очистить и записать", command=self.apply_selected).pack(side=LEFT)
-        ttk.Button(bar, text="Применить ко всем", command=self.apply_all).pack(side=LEFT, padx=(6, 0))
+        self.search_var = tk.StringVar()
+        self.search_var.trace_add("write", lambda *_: self._apply_filter())
+        search = tk.Entry(
+            header,
+            textvariable=self.search_var,
+            bg=SURFACE_2,
+            fg=TEXT,
+            insertbackground=TEXT,
+            relief="flat",
+            font=FONT_BODY,
+            width=18,
+        )
+        search.pack(side="right", ipady=6, padx=(8, 0))
+        tk.Label(header, text="Поиск", bg=BG, fg=DIM, font=FONT_SMALL).pack(side="right", padx=(0, 6))
 
-        self.backup_var = BooleanVar(value=True)
-        ttk.Checkbutton(bar, text="Бэкап .bak", variable=self.backup_var).pack(side=RIGHT)
+        self._button(header, "Добавить файлы", self.add_files_dialog, accent=False).pack(side="right", padx=(0, 6))
+        self._button(header, "Открыть папку", self.open_folder, accent=True).pack(side="right", padx=(0, 6))
+
+        tk.Frame(self.root, bg=BORDER, height=1).pack(fill="x", padx=18, pady=(8, 0))
+
+    def _button(self, parent: tk.Misc, text: str, command, accent: bool = False) -> tk.Button:  # noqa: ANN001
+        background = ACCENT if accent else SURFACE_2
+        active = ACCENT_HOVER if accent else HOVER
+        button = tk.Button(
+            parent,
+            text=text,
+            command=command,
+            bg=background,
+            fg=TEXT if accent else "#D6D6DD",
+            activebackground=active,
+            activeforeground=TEXT,
+            relief="flat",
+            bd=0,
+            padx=14,
+            pady=6,
+            font=FONT_BODY,
+            cursor="hand2",
+        )
+        button.bind("<Enter>", lambda _event: button.configure(bg=active))
+        button.bind("<Leave>", lambda _event: button.configure(bg=background))
+        return button
 
     def _build_body(self) -> None:
-        paned = ttk.PanedWindow(self.root, orient="horizontal")
-        paned.pack(fill=BOTH, expand=True, padx=10, pady=6)
+        body = tk.Frame(self.root, bg=BG)
+        body.pack(fill="both", expand=True, padx=18, pady=(10, 0))
 
-        left = ttk.Frame(paned)
-        paned.add(left, weight=1)
-        columns = ("container", "covers", "tags")
-        self.file_tree = ttk.Treeview(left, columns=columns, show="tree headings", selectmode="extended")
-        self.file_tree.heading("#0", text="Файл")
-        self.file_tree.heading("container", text="Формат")
-        self.file_tree.heading("covers", text="Обложек")
-        self.file_tree.heading("tags", text="Теги")
-        self.file_tree.column("#0", width=260, anchor="w")
-        self.file_tree.column("container", width=70, anchor="center")
-        self.file_tree.column("covers", width=70, anchor="center")
-        self.file_tree.column("tags", width=190, anchor="w")
-        self.file_tree.pack(side=LEFT, fill=BOTH, expand=True)
-        scroll = ttk.Scrollbar(left, orient="vertical", command=self.file_tree.yview)
-        scroll.pack(side=RIGHT, fill=Y)
-        self.file_tree.configure(yscrollcommand=scroll.set)
-        self.file_tree.bind("<<TreeviewSelect>>", self._on_file_selected)
+        list_frame = tk.Frame(body, bg=BG)
+        list_frame.pack(side="left", fill="both", expand=True)
 
-        right = ttk.Frame(paned)
-        paned.add(right, weight=2)
+        self.track_list = TrackList(list_frame, self._on_track_selected)
+        scrollbar = SlimScrollbar(list_frame, self.track_list.yview)
+        self.track_list.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y", padx=(6, 0))
+        self.track_list.pack(side="left", fill="both", expand=True)
 
-        preview_row = ttk.Frame(right)
-        preview_row.pack(fill=X)
-        self.preview = ttk.Label(preview_row, text="обложки нет", anchor="center", width=34, relief="groove")
-        self.preview.pack(side=LEFT, padx=(0, 10), ipady=6)
+        self._build_details(body)
 
-        picture_frame = ttk.LabelFrame(preview_row, text="Обложки в файле", padding=6)
-        picture_frame.pack(side=LEFT, fill=BOTH, expand=True)
-        self.picture_tree = ttk.Treeview(
-            picture_frame, columns=("type", "mime", "size"), show="headings", height=6, selectmode="browse"
+    def _build_details(self, parent: tk.Frame) -> None:
+        panel = tk.Frame(parent, bg=SURFACE, width=380)
+        panel.pack(side="right", fill="y", padx=(14, 0))
+        panel.pack_propagate(False)
+
+        actions = tk.Frame(panel, bg=SURFACE)
+        actions.pack(side="bottom", fill="x", padx=16, pady=(10, 12))
+        self._button(actions, "Записать", self.apply_current, accent=True).pack(side="left")
+        self._button(actions, "Записать все", self.apply_all).pack(side="left", padx=(6, 0))
+        self.backup_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            actions,
+            text="Бэкап",
+            variable=self.backup_var,
+            bg=SURFACE,
+            fg=MUTED,
+            activebackground=SURFACE,
+            activeforeground=TEXT,
+            selectcolor=SURFACE_2,
+            font=FONT_SMALL,
+            bd=0,
+            highlightthickness=0,
+        ).pack(side="right")
+
+        self.detail_canvas = tk.Canvas(panel, bg=SURFACE, highlightthickness=0, bd=0)
+        self.detail_canvas.pack(fill="both", expand=True)
+        inner = tk.Frame(self.detail_canvas, bg=SURFACE)
+        self._detail_window = self.detail_canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind(
+            "<Configure>",
+            lambda _event: self.detail_canvas.configure(scrollregion=self.detail_canvas.bbox("all")),
         )
-        self.picture_tree.heading("type", text="Тип")
-        self.picture_tree.heading("mime", text="Формат")
-        self.picture_tree.heading("size", text="Размер")
-        self.picture_tree.column("type", width=150, anchor="w")
-        self.picture_tree.column("mime", width=110, anchor="w")
-        self.picture_tree.column("size", width=120, anchor="w")
-        self.picture_tree.pack(fill=BOTH, expand=True)
-        self.picture_tree.bind("<<TreeviewSelect>>", self._on_picture_selected)
+        self.detail_canvas.bind(
+            "<Configure>",
+            lambda event: self.detail_canvas.itemconfigure(self._detail_window, width=event.width),
+        )
+        self.detail_canvas.bind("<MouseWheel>", self._on_detail_wheel)
 
-        picture_buttons = ttk.Frame(picture_frame)
-        picture_buttons.pack(fill=X, pady=(6, 0))
-        ttk.Button(picture_buttons, text="Вложить картинку…", command=self.choose_cover).pack(side=LEFT)
-        ttk.Button(picture_buttons, text="Без обложки", command=self.clear_cover).pack(side=LEFT, padx=(6, 0))
+        self.detail_title = tk.Label(
+            inner, text="Ничего не выбрано", bg=SURFACE, fg=TEXT, font=("Segoe UI", 12, "bold"), anchor="w"
+        )
+        self.detail_title.pack(fill="x", padx=16, pady=(10, 2))
+        self.detail_sub = tk.Label(inner, text="", bg=SURFACE, fg=DIM, font=FONT_SMALL, anchor="w")
+        self.detail_sub.pack(fill="x", padx=16)
 
-        self._build_metadata(right)
+        self.detail_cover = tk.Label(inner, bg=SURFACE, bd=0)
+        self.detail_cover.pack(pady=(8, 4))
 
-    def _build_metadata(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Метаданные (применяются к записываемым файлам)", padding=8)
-        frame.pack(fill=BOTH, expand=True, pady=(10, 0))
+        self.covers_row = tk.Frame(inner, bg=SURFACE)
+        self.covers_row.pack(fill="x", padx=16)
 
-        self.vars: dict[str, StringVar] = {}
+        buttons = tk.Frame(inner, bg=SURFACE)
+        buttons.pack(fill="x", padx=16, pady=(6, 0))
+        self._button(buttons, "Вложить картинку", self.choose_cover).pack(side="left")
+        self._button(buttons, "Без обложки", self.clear_cover).pack(side="left", padx=(6, 0))
+
+        fields = tk.Frame(inner, bg=SURFACE)
+        fields.pack(fill="x", padx=16, pady=(8, 0))
+        self.vars: dict[str, tk.StringVar] = {}
         for index, (name, label) in enumerate(FIELD_LABELS.items()):
             row, column = divmod(index, 2)
-            cell = ttk.Frame(frame)
-            cell.grid(row=row, column=column, sticky="ew", padx=6, pady=3)
-            ttk.Label(cell, text=label, width=18).pack(side=LEFT)
-            variable = StringVar()
+            cell = tk.Frame(fields, bg=SURFACE)
+            cell.grid(row=row, column=column, sticky="ew", padx=(0, 8), pady=3)
+            tk.Label(cell, text=label, bg=SURFACE, fg=MUTED, font=FONT_SMALL, anchor="w").pack(fill="x")
+            variable = tk.StringVar()
             self.vars[name] = variable
-            ttk.Entry(cell, textvariable=variable).pack(side=LEFT, fill=X, expand=True)
-        frame.columnconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=1)
+            entry = tk.Entry(
+                cell,
+                textvariable=variable,
+                bg=SURFACE_2,
+                fg=TEXT,
+                insertbackground=TEXT,
+                relief="flat",
+                font=FONT_BODY,
+                highlightthickness=1,
+                highlightbackground=SURFACE_2,
+                highlightcolor=ACCENT,
+            )
+            entry.pack(fill="x", ipady=3)
+        fields.columnconfigure(0, weight=1)
+        fields.columnconfigure(1, weight=1)
 
-    def _build_log(self) -> None:
-        frame = ttk.LabelFrame(self.root, text="Журнал", padding=4)
-        frame.pack(fill=BOTH, expand=False, padx=10, pady=(0, 4))
-        self.log_text = ttk.Treeview(frame, columns=("message",), show="headings", height=6)
-        self.log_text.heading("message", text="Что сделано")
-        self.log_text.column("message", width=900, anchor="w")
-        self.log_text.pack(side=LEFT, fill=BOTH, expand=True)
-        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.log_text.yview)
-        scroll.pack(side=RIGHT, fill=Y)
-        self.log_text.configure(yscrollcommand=scroll.set)
+        self.warning_label = tk.Label(
+            inner,
+            text="",
+            bg=SURFACE,
+            fg="#E0A458",
+            font=FONT_SMALL,
+            anchor="w",
+            justify="left",
+            wraplength=330,
+        )
+        self._warning_packed = False
+
+        self._bind_wheel(inner)
+
+    def _on_detail_wheel(self, event: tk.Event) -> str:  # noqa: ANN001
+        self.detail_canvas.yview_scroll(int(-event.delta / 120), "units")
+        return "break"
+
+    def _bind_wheel(self, widget: tk.Misc) -> None:
+        widget.bind("<MouseWheel>", self._on_detail_wheel)
+        for child in widget.winfo_children():
+            self._bind_wheel(child)
 
     def _build_status(self) -> None:
-        self.status = StringVar(value="Перетащите файлы в окно или нажмите «Добавить файлы…»")
-        ttk.Label(self.root, textvariable=self.status, anchor="w", padding=(10, 2, 10, 8)).pack(fill=X)
+        bar = tk.Frame(self.root, bg=BG)
+        bar.pack(fill="x", padx=18, pady=(8, 10))
+        self.status = tk.StringVar(value="Готово")
+        tk.Label(bar, textvariable=self.status, bg=BG, fg=DIM, font=FONT_SMALL, anchor="w").pack(side="left")
+        self.count_label = tk.Label(bar, text="", bg=BG, fg=DIM, font=FONT_SMALL, anchor="e")
+        self.count_label.pack(side="right")
+        self.log_label = tk.Label(bar, text="", bg=BG, fg=MUTED, font=FONT_SMALL, anchor="e")
+        self.log_label.pack(side="right", padx=(0, 16))
 
-    def _enable_drop(self) -> None:
-        from tkinterdnd2 import DND_FILES
+    # ----------------------------------------------------------------- data
+    def open_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Папка с треками")
+        if folder:
+            self.load_folder(Path(folder))
 
-        for widget in (self.root, self.file_tree):
-            widget.drop_target_register(DND_FILES)
-            widget.dnd_bind("<<Drop>>", self._on_drop)
-
-    # ----------------------------------------------------------------- events
-    def _on_drop(self, event) -> None:  # noqa: ANN001 - tkinter event
-        paths = [Path(item) for item in self.root.tk.splitlist(event.data)]
-        self.add_paths(paths)
-
-    def _on_file_selected(self, _event=None) -> None:  # noqa: ANN001
-        selection = self.file_tree.selection()
-        if not selection:
+    def load_folder(self, folder: Path) -> None:
+        folder = Path(folder)
+        paths = sorted(
+            path for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in AUDIO_SUFFIXES
+        )
+        if not paths:
+            messagebox.showinfo("CoverFix", "В этой папке нет аудиофайлов.")
             return
-        path = Path(selection[0])
-        report = self.reports.get(path)
-        if report is None:
-            try:
-                report = inspect_file(path)
-            except Exception as exc:
-                self.log(f"ОШИБКА {path.name}: {exc}")
-                return
-            self.reports[path] = report
-        self._show_report(path, report)
+        self._load(paths, replace=True)
 
-    def _on_picture_selected(self, _event=None) -> None:  # noqa: ANN001
-        selection = self.picture_tree.selection()
-        if not selection:
-            return
-        index = int(selection[0])
-        if 0 <= index < len(self.pictures):
-            self.chosen = self.pictures[index]
-            self._set_preview(self.chosen)
-
-    # ------------------------------------------------------------- operations
     def add_files_dialog(self) -> None:
         names = filedialog.askopenfilenames(
             title="Аудиофайлы",
-            filetypes=[
-                ("Аудио", "*.mp3 *.flac *.m4a *.m4b *.mp4 *.ogg *.oga *.opus *.aac"),
-                ("Все файлы", "*.*"),
-            ],
+            filetypes=[("Аудио", " ".join(f"*{suffix}" for suffix in sorted(AUDIO_SUFFIXES))), ("Все файлы", "*.*")],
         )
         self.add_paths([Path(name) for name in names])
 
     def add_paths(self, paths: list[Path]) -> None:
-        added = 0
+        expanded: list[Path] = []
         for path in paths:
+            path = Path(path)
             if path.is_dir():
-                for child in sorted(path.iterdir()):
-                    if child.suffix.lower() in AUDIO_SUFFIXES:
-                        added += self._add_one(child)
+                expanded.extend(
+                    sorted(
+                        child
+                        for child in path.rglob("*")
+                        if child.is_file() and child.suffix.lower() in AUDIO_SUFFIXES
+                    )
+                )
+            elif path.suffix.lower() in AUDIO_SUFFIXES:
+                expanded.append(path)
+        self._load(expanded, replace=False)
+
+    def _load(self, paths: list[Path], replace: bool) -> None:
+        self.root.configure(cursor="watch")
+        self.root.update_idletasks()
+        if replace:
+            self.order.clear()
+            self.reports.clear()
+        failures = 0
+        for path in paths:
+            resolved = path.resolve()
+            if resolved in self.reports:
                 continue
-            added += self._add_one(path)
-        if added:
-            self.status.set(f"Добавлено файлов: {added}")
-        if added and not self.file_tree.selection():
-            first = self.file_tree.get_children()
-            if first:
-                self.file_tree.selection_set(first[0])
-                self._on_file_selected()
-
-    def _add_one(self, path: Path) -> int:
-        path = path.resolve()
-        if path in self.reports:
-            return 0
-        try:
-            report = inspect_file(path)
-        except (FileNotFoundError, UnsupportedFormat) as exc:
-            self.log(f"ПРОПУСК {path.name}: {exc}")
-            return 0
-        except Exception as exc:
-            self.log(f"ОШИБКА {path.name}: {exc}")
-            return 0
-        self.reports[path] = report
-        self.file_tree.insert(
-            "",
-            END,
-            iid=str(path),
-            text=path.name,
-            values=(report.container, len(report.pictures), ", ".join(report.tag_versions)),
+            try:
+                self.reports[resolved] = inspect_file(resolved)
+                self.order.append(resolved)
+            except Exception:
+                failures += 1
+        self.root.configure(cursor="")
+        self._apply_filter()
+        self.status.set(
+            f"Загружено треков: {len(self.order)}" + (f", ошибок: {failures}" if failures else "")
         )
-        return 1
+        if self.track_list.reports:
+            self.track_list.select(0)
 
-    def remove_selected(self) -> None:
-        for item in self.file_tree.selection():
-            path = Path(item)
-            self.reports.pop(path, None)
-            self.file_tree.delete(item)
+    def _apply_filter(self) -> None:
+        query = self.search_var.get().strip().lower()
+        reports = []
+        for path in self.order:
+            report = self.reports.get(path)
+            if report is None:
+                continue
+            if query:
+                haystack = " ".join(
+                    [report.fields.get("title", ""), report.fields.get("artist", ""), path.name]
+                ).lower()
+                if query not in haystack:
+                    continue
+            reports.append(report)
+        self.track_list.set_reports(reports)
+        self.count_label.configure(text=f"{len(reports)} из {len(self.order)}" if query else f"{len(reports)} треков")
 
-    def refresh_current(self) -> None:
-        selection = self.file_tree.selection()
-        if not selection:
-            return
-        path = Path(selection[0])
-        try:
-            report = inspect_file(path)
-        except Exception as exc:
-            self.log(f"ОШИБКА {path.name}: {exc}")
-            return
-        self.reports[path] = report
-        self.file_tree.item(
-            str(path),
-            values=(report.container, len(report.pictures), ", ".join(report.tag_versions)),
+    # --------------------------------------------------------------- actions
+    def _enable_drop(self) -> None:
+        from tkinterdnd2 import DND_FILES
+
+        for widget in (self.root, self.track_list):
+            widget.drop_target_register(DND_FILES)
+            widget.dnd_bind("<<Drop>>", self._on_drop)
+
+    def _on_drop(self, event) -> None:  # noqa: ANN001 - tkinter event
+        self.add_paths([Path(item) for item in self.root.tk.splitlist(event.data)])
+
+    def _on_track_selected(self, report: FileReport) -> None:
+        self.current = report
+        self.chosen = report.front_cover
+        for name, variable in self.vars.items():
+            variable.set(report.fields.get(name, ""))
+
+        title = report.fields.get("title") or report.path.stem
+        artist = report.fields.get("artist") or "—"
+        self.detail_title.configure(text=_ellipsize(title, 34))
+        self.detail_sub.configure(
+            text=f"{_ellipsize(artist, 30)} · {report.container.upper()} · {_duration(report.audio.get('duration'))}"
         )
-        self._show_report(path, report)
+
+        self._show_cover(self.chosen)
+        self._show_cover_choices(report)
+        self.warning_label.configure(text="")
+        if self._warning_packed:
+            self.warning_label.pack_forget()
+            self._warning_packed = False
+        self.warning_label.configure(text="\n".join(report.warnings[:2]))
+        if report.warnings:
+            self.warning_label.pack(fill="x", padx=16, pady=(8, 14))
+            self._warning_packed = True
+        self.status.set(str(report.path))
+
+    def _show_cover(self, picture: Picture | None) -> None:
+        image = _cover_image(picture.data if picture else None, DETAIL_COVER, 14, SURFACE)
+        self._detail_photo = ImageTk.PhotoImage(image)
+        self.detail_cover.configure(image=self._detail_photo)
+
+    def _show_cover_choices(self, report: FileReport) -> None:
+        for child in self.covers_row.winfo_children():
+            child.destroy()
+        self._cover_photos.clear()
+
+        for picture in report.pictures[:8]:
+            photo = ImageTk.PhotoImage(_cover_image(picture.data, 42, 6, SURFACE))
+            self._cover_photos.append(photo)
+            frame = tk.Frame(self.covers_row, bg=ACCENT if picture is self.chosen else SURFACE_2, padx=2, pady=2)
+            frame.pack(side="left", padx=(0, 6))
+            label = tk.Label(frame, image=photo, bg=SURFACE, bd=0, cursor="hand2")
+            label.pack()
+            label.bind("<Button-1>", lambda _event, chosen=picture: self._pick_cover(chosen))
+        self._bind_wheel(self.covers_row)
+
+    def _pick_cover(self, picture: Picture) -> None:
+        self.chosen = picture
+        self._show_cover(picture)
+        if self.current is not None:
+            for child in self.covers_row.winfo_children():
+                child.destroy()
+            self._show_cover_choices(self.current)
+        self.status.set(f"Выбрана обложка: {picture.type_name}, {picture.resolution}")
 
     def choose_cover(self) -> None:
         name = filedialog.askopenfilename(
@@ -268,36 +668,33 @@ class App:
             data = Path(name).read_bytes()
             self.chosen = make_picture(0, data, type=3, desc="Cover", source="file")
         except Exception as exc:
-            self.log(f"ОШИБКА чтения картинки: {exc}")
+            self.status.set(f"Не удалось прочитать картинку: {exc}")
             return
-        self._set_preview(self.chosen)
-        self.status.set(f"Выбрана внешняя картинка: {Path(name).name} ({self.chosen.size} Б)")
+        self._show_cover(self.chosen)
+        self.status.set(f"Внешняя обложка: {Path(name).name}")
 
     def clear_cover(self) -> None:
         self.chosen = None
-        self.picture_tree.selection_remove(self.picture_tree.selection())
-        self._set_preview(None)
-        self.status.set("Запись пройдёт без обложки")
+        self._show_cover(None)
+        self.status.set("Файл будет записан без обложки")
 
-    def apply_selected(self) -> None:
-        selection = [Path(item) for item in self.file_tree.selection()]
-        if not selection:
-            messagebox.showinfo("CoverFix", "Выберите файлы в списке слева.")
+    def apply_current(self) -> None:
+        if self.current is None:
+            messagebox.showinfo("CoverFix", "Выберите трек в списке.")
             return
-        self._apply(selection)
+        self._apply([self.current.path])
 
     def apply_all(self) -> None:
-        paths = [Path(item) for item in self.file_tree.get_children()]
-        if not paths:
+        if not self.order:
             messagebox.showinfo("CoverFix", "Список пуст.")
             return
         if not messagebox.askyesno(
             "CoverFix",
-            f"Применить выбранную обложку и поля ко всем файлам ({len(paths)})?\n"
-            "Создаются резервные копии .bak.",
+            f"Применить выбранную обложку и поля ко всем трекам ({len(self.order)})?\n"
+            "Перед записью создаются копии .bak.",
         ):
             return
-        self._apply(paths)
+        self._apply(list(self.order))
 
     def _apply(self, paths: list[Path]) -> None:
         metadata = {name: variable.get().strip() for name, variable in self.vars.items()}
@@ -307,87 +704,44 @@ class App:
             try:
                 after = clean_file(path, keep=cover, metadata=metadata, backup=self.backup_var.get())
             except Exception as exc:
-                self.log(f"ОШИБКА {path.name}: {exc}")
-                self.log(traceback.format_exc(limit=1))
+                self.log_label.configure(text=f"Ошибка: {path.name}")
+                self.status.set(f"{path.name}: {exc}")
+                traceback.print_exc(limit=1)
                 continue
-            ok += 1
             self.reports[path] = after
-            if self.file_tree.exists(str(path)):
-                self.file_tree.item(
-                    str(path),
-                    values=(after.container, len(after.pictures), ", ".join(after.tag_versions)),
-                )
-            self.log(
-                f"OK {path.name}: обложек {len(after.pictures)}, теги {', '.join(after.tag_versions) or 'нет'}"
-            )
-        self.status.set(f"Записано файлов: {ok} из {len(paths)}")
-        current = self.file_tree.selection()
-        if current:
-            self._show_report(Path(current[0]), self.reports[Path(current[0])])
-
-    # ------------------------------------------------------------------ view
-    def _show_report(self, path: Path, report: FileReport) -> None:
-        for name, variable in self.vars.items():
-            variable.set(report.fields.get(name, ""))
-
-        self.pictures = report.pictures
-        self.picture_tree.delete(*self.picture_tree.get_children())
-        for picture in report.pictures:
-            self.picture_tree.insert(
-                "",
-                END,
-                iid=str(picture.index),
-                values=(picture.type_name, picture.mime, f"{picture.resolution}, {picture.size} Б"),
-            )
-
-        self.chosen = report.front_cover
-        self._set_preview(self.chosen)
-        if report.pictures:
-            self.picture_tree.selection_set(str(self.chosen.index) if self.chosen else "0")
-
-        versions = ", ".join(report.tag_versions) or "нет"
-        self.status.set(
-            f"{path.name}: {report.container}, теги {versions}, обложек {len(report.pictures)}"
-        )
-        for warning in report.warnings:
-            self.log(f"! {path.name}: {warning}")
-
-    def _set_preview(self, picture: Picture | None) -> None:
-        if picture is None:
-            self._photo = None
-            self.preview.configure(image="", text="обложки нет")
-            return
-        try:
-            image = Image.open(io.BytesIO(picture.data))
-            image.thumbnail(PREVIEW_SIZE)
-            photo = ImageTk.PhotoImage(image)
-        except Exception:
-            self._photo = None
-            self.preview.configure(image="", text="превью недоступно")
-            return
-        self._photo = photo
-        self.preview.configure(image=photo, text="")
-
-    def log(self, message: str) -> None:
-        self.log_text.insert("", END, values=(message,))
-        children = self.log_text.get_children()
-        if children:
-            self.log_text.see(children[-1])
+            ok += 1
+        if ok:
+            self._apply_filter()
+            self.log_label.configure(text=f"Записано: {ok}")
+            self.status.set(f"Записано файлов: {ok} из {len(paths)}")
+            if self.current is not None:
+                for index, report in enumerate(self.track_list.reports):
+                    if report.path == self.current.path:
+                        self.track_list.select(index)
+                        break
+        else:
+            self.status.set(f"Ничего не записано: {len(paths)} ошибок")
 
 
-def create_root() -> tuple[Tk, bool]:
+def create_root():
     try:
         from tkinterdnd2 import TkinterDnD
 
         return TkinterDnD.Tk(), True
     except Exception:
-        return Tk(), False
+        return tk.Tk(), False
 
 
 def main() -> int:
     _enable_dpi_awareness()
     root, dnd = create_root()
-    App(root, dnd)
+    app = App(root, dnd)
+    for argument in sys.argv[1:]:
+        candidate = Path(argument)
+        if candidate.is_dir():
+            app.load_folder(candidate)
+        elif candidate.is_file():
+            app.add_paths([candidate])
     root.mainloop()
     return 0
 
