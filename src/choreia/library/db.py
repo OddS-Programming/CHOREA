@@ -132,11 +132,11 @@ class Library:
     # ------------------------------------------------------------- lifecycle
     def _migrate(self) -> None:
         with self._lock:
-            version = self._conn.execute("PRAGMA user_version").fetchone()[0]
-            if version < SCHEMA_VERSION:
-                self._conn.executescript(SCHEMA)
-                self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
-                self._conn.commit()
+            # The schema is idempotent (CREATE TABLE IF NOT EXISTS), so apply it on
+            # every open: a new table must appear in databases created earlier.
+            self._conn.executescript(SCHEMA)
+            self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            self._conn.commit()
 
     def close(self) -> None:
         with self._lock:

@@ -263,6 +263,26 @@ def test_album_tracks_keep_artist_filter_when_it_matches(tmp_path: Path) -> None
     library.close()
 
 
+def test_schema_creates_new_tables_in_existing_databases(tmp_path: Path) -> None:
+    import sqlite3
+
+    database = tmp_path / "library.db"
+    library = Library(database)
+    library.upsert_track(path="C:/m/a.mp3", title="A", album="Demo")
+    library.close()
+
+    connection = sqlite3.connect(database)
+    connection.execute("DROP TABLE album_covers")
+    connection.commit()
+    connection.close()
+
+    reopened = Library(database)
+
+    reopened.set_album_cover("Demo", "hash")
+    assert reopened.album_cover("Demo") == "hash"
+    reopened.close()
+
+
 def test_album_cover_override_wins_over_file_art(tmp_path: Path) -> None:
     library = _library(tmp_path)
     library.upsert_track(path="C:/m/a.mp3", title="A", artist="X", album="Demo", cover_hash="file")
