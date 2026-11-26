@@ -247,6 +247,12 @@ def test_cover_can_apply_to_whole_album(server) -> None:
     assert len(inspect_file(second).pictures) == 1
 
 
+def test_reveal_missing_path(server, tmp_path) -> None:
+    running, _library, _track = server
+    status, _payload = _post(running, "/api/reveal", {"path": str(tmp_path / "missing")})
+    assert status == 404
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

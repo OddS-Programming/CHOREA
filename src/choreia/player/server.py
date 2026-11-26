@@ -8,6 +8,7 @@ import json
 import mimetypes
 import re
 import secrets
+import subprocess
 import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -258,6 +259,25 @@ class Handler(BaseHTTPRequestHandler):
         lyrics_match = re.match(r"^/api/lyrics/(\d+)$", path)
         if lyrics_match:
             self._save_lyrics(int(lyrics_match.group(1)))
+            return
+
+        if path == "/api/pick-folder":
+            from .dialogs import pick_folder
+
+            self._json({"path": pick_folder()})
+            return
+
+        if path == "/api/reveal":
+            payload = self._read_json()
+            target = Path(str(payload.get("path", "")))
+            if not target.exists():
+                self._error(404, "not found")
+                return
+            if target.is_dir():
+                subprocess.run(["explorer", str(target)], check=False)
+            else:
+                subprocess.run(["explorer", "/select,", str(target)], check=False)
+            self._json({"ok": True})
             return
 
         if path == "/api/folders":

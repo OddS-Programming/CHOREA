@@ -13,6 +13,7 @@ from pathlib import Path
 from .library.db import Library
 from .library.thumbs import ThumbCache
 from .player.server import Server
+from .window import find_edge, find_window, focus_window, open_app_window
 
 APP_NAME = "Choreia"
 _MUTEX = None
@@ -20,18 +21,22 @@ ERROR_ALREADY_EXISTS = 183
 
 
 def acquire_single_instance() -> bool:
-    """One player per user session; a second launch exits instead of hanging."""
+    """One player per user session; a second launch focuses the first window."""
     global _MUTEX
     if sys.platform != "win32":
         return True
     _MUTEX = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\ChoreiaPlayer")
     if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
-        ctypes.windll.user32.MessageBoxW(
-            None,
-            "χορεία уже запущена. Найдите окно на панели задач.",
-            "χορεία",
-            0x40,
-        )
+        hwnd = find_window()
+        if hwnd:
+            focus_window(hwnd)
+        else:
+            ctypes.windll.user32.MessageBoxW(
+                None,
+                "χορεία уже запущена. Найдите окно на панели задач.",
+                "χορεία",
+                0x40,
+            )
         return False
     return True
 
@@ -103,19 +108,35 @@ class Bridge:
 
 
 def main() -> int:
-    import webview
-
     directory = app_dir()
     directory.mkdir(parents=True, exist_ok=True)
     configure_logging(directory)
     if not acquire_single_instance():
         return 0
+    logging.info("startup: app dir %s", directory)
     library = Library(directory / "library.db")
     thumbs = ThumbCache(directory / "cache" / "thumbs")
     load_credentials(library, directory)
 
     web_root = Path(__file__).parent / "web"
     server = Server(library, thumbs, web_root).start()
+    logging.info("startup: server on port %s", server.port)
+
+    try:
+        if find_edge() is not None:
+            logging.info("startup: edge window")
+            open_app_window(server.url, directory / "edge")
+        else:
+            logging.info("startup: embedded webview fallback")
+            run_embedded(server, library)
+    finally:
+        server.stop()
+        library.close()
+    return 0
+
+
+def run_embedded(server: Server, library: Library) -> None:
+    import webview
 
     bridge = Bridge()
     bridge.library = library
@@ -129,13 +150,7 @@ def main() -> int:
         js_api=bridge,
     )
     bridge.window = window
-
-    try:
-        webview.start()
-    finally:
-        server.stop()
-        library.close()
-    return 0
+    webview.start()
 
 
 if __name__ == "__main__":

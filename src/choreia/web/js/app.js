@@ -464,6 +464,9 @@ async function renderFolders() {
       </div>
       <div class="row-album"></div>
       <div class="row-time">
+        <button class="row-open" data-open="${escapeHtml(folder.path)}" title="Открыть папку">
+          <svg viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        </button>
         <button class="row-remove" data-remove="${folder.id}" title="Убрать папку из библиотеки">✕</button>
         <span>⟳</span>
       </div>
@@ -502,13 +505,17 @@ function switchView(view) {
 /* ------------------------------------------------------------------- scan */
 async function addFolder() {
   let folder = null;
-  if (window.pywebview?.api?.pick_folder) {
-    folder = await window.pywebview.api.pick_folder();
-  } else {
-    folder = window.prompt("Путь к папке с музыкой", "C:\\\\Music");
+  try {
+    const response = await API.post("pick-folder", {});
+    folder = response.path;
+  } catch (error) {
+    folder = null;
   }
-  if (!folder) return;
+  if (!folder && window.pywebview && window.pywebview.api) {
+    folder = await window.pywebview.api.pick_folder();
+  }
   if (Array.isArray(folder)) folder = folder[0];
+  if (!folder) return;
   try {
     await API.post("folders", { path: folder });
     const result = await API.post("scan", { path: folder });
@@ -753,6 +760,12 @@ async function clearLyrics() {
 
 /* ---------------------------------------------------------------- wiring */
 el.view.addEventListener("click", (event) => {
+  const open = event.target.closest(".row-open");
+  if (open) {
+    event.stopPropagation();
+    API.post("reveal", { path: open.dataset.open }).catch((error) => toast(`Не удалось открыть: ${error.message}`));
+    return;
+  }
   const remove = event.target.closest(".row-remove");
   if (remove) {
     event.stopPropagation();

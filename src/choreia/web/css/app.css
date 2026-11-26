@@ -550,6 +550,25 @@ body.np-open .player { visibility: hidden; }
 .row:hover .row-remove { opacity: 1; }
 .row-remove:hover { background: rgba(239, 68, 68, 0.16); color: #ef4444; }
 
+.row-open {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  opacity: 0.3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 140ms ease, background 140ms ease, color 140ms ease;
+}
+
+.row-open svg { width: 15px; height: 15px; fill: currentColor; }
+.row:hover .row-open { opacity: 1; }
+.row-open:hover { background: var(--accent-soft); color: var(--accent); }
+
 .modal {
   position: fixed;
   inset: 0;
