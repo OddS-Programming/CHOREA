@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>χορεία</title>
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark"></span>
+      <span class="brand-name">χορεία</span>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-view="library">
+        <span class="nav-icon">≡</span><span>Библиотека</span>
+      </button>
+      <button class="nav-item" data-view="folders">
+        <span class="nav-icon">▤</span><span>Папки</span>
+      </button>
+      <button class="nav-item" data-view="playlists">
+        <span class="nav-icon">◈</span><span>Плейлисты</span>
+      </button>
+      <button class="nav-item" data-view="online">
+        <span class="nav-icon">↓</span><span>Интернет</span>
+      </button>
+    </nav>
+    <div class="sidebar-foot">
+      <button class="ghost" id="add-folder">Добавить папку</button>
+      <div class="hint" id="scan-hint"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumbs" id="crumbs">Библиотека</div>
+      <div class="topbar-right">
+        <input id="search" class="search" type="search" placeholder="Поиск: трек, исполнитель, альбом" autocomplete="off">
+        <select id="sort" class="sort" title="Сортировка">
+          <option value="artist">По исполнителю</option>
+          <option value="title">По названию</option>
+          <option value="album">По альбому</option>
+          <option value="year">По году</option>
+          <option value="duration">По длительности</option>
+          <option value="added">По дате добавления</option>
+          <option value="played">По прослушиваниям</option>
+        </select>
+      </div>
+    </header>
+
+    <section class="view" id="view"></section>
+  </main>
+</div>
+
+<footer class="player" id="player">
+  <div class="now" id="now">
+    <div class="now-cover" id="now-cover"></div>
+    <div class="now-text">
+      <div class="now-title" id="now-title">Ничего не играет</div>
+      <div class="now-artist" id="now-artist"></div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="buttons">
+      <button class="icon-btn" id="shuffle" title="Перемешать">⤨</button>
+      <button class="icon-btn" id="prev" title="Предыдущий">⏮</button>
+      <button class="play-btn" id="play" title="Играть">▶</button>
+      <button class="icon-btn" id="next" title="Следующий">⏭</button>
+      <button class="icon-btn" id="repeat" title="Повтор">↻</button>
+    </div>
+    <div class="seek-row">
+      <span class="time" id="elapsed">0:00</span>
+      <input class="seek" id="seek" type="range" min="0" max="1000" value="0" step="1">
+      <span class="time" id="duration">0:00</span>
+    </div>
+  </div>
+
+  <div class="volume-wrap">
+    <button class="icon-btn" id="mute" title="Звук">▮</button>
+    <input class="volume" id="volume" type="range" min="0" max="100" value="80" step="1">
+  </div>
+</footer>
+
+<div class="nowplaying" id="nowplaying" hidden>
+  <div class="np-backdrop" id="np-backdrop"></div>
+  <div class="np-body">
+    <button class="np-close" id="np-close" title="Закрыть">✕</button>
+    <div class="np-cover" id="np-cover"></div>
+    <div class="np-info">
+      <div class="np-title" id="np-title"></div>
+      <div class="np-artist" id="np-artist"></div>
+      <div class="np-album" id="np-album"></div>
+    </div>
+    <canvas class="np-spectrum" id="spectrum" width="520" height="120"></canvas>
+    <div class="np-lyrics" id="np-lyrics">Текст появится здесь</div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<audio id="audio" preload="metadata"></audio>
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

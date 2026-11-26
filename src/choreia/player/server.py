@@ -210,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
             if root not in candidate.parents and candidate != root:
                 self._error(403, "forbidden")
                 return
-            cache = "public, max-age=3600"
+            cache = "no-cache"
             self._file(candidate, cache=cache)
             return
 

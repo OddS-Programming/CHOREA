@@ -98,6 +98,17 @@ def test_cover_thumbnail_is_cached(tmp_path: Path, asset) -> None:
     library.close()
 
 
+def test_thumbnail_renders_any_requested_size(tmp_path: Path) -> None:
+    cache = ThumbCache(tmp_path / "thumbs")
+    digest, _ = cache.ensure(helpers.jpeg((1, 2, 3)), 320)
+
+    small = cache.find(digest, 64)
+    large = cache.find(digest, 640)
+
+    assert small is not None and small.name.endswith("-64.jpg")
+    assert large is not None and large.name.endswith("-640.jpg")
+
+
 def test_thumbnail_ensure_is_idempotent(tmp_path: Path) -> None:
     cache = ThumbCache(tmp_path / "thumbs")
     data = helpers.jpeg((10, 20, 30))
