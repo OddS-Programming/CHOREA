@@ -170,6 +170,83 @@ def test_lyrics_can_be_deleted(server) -> None:
     assert json.loads(body)["lyrics"] is None
 
 
+def test_cover_can_be_set_and_removed(server) -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    from choreia.core import inspect_file
+
+    running, _library, track = server
+    buffer = io.BytesIO()
+    Image.new("RGB", (1200, 1200), (200, 30, 30)).save(buffer, "JPEG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    status, payload = _post(
+        running,
+        "/api/tracks/1",
+        {"title": "Cover test", "cover_action": "set", "cover": f"data:image/jpeg;base64,{encoded}"},
+    )
+    assert status == 200
+    assert payload["track"]["cover_hash"]
+    report = inspect_file(track)
+    assert len(report.pictures) == 1
+    assert report.pictures[0].width == 1200
+
+    status, _payload = _post(running, "/api/tracks/1", {"title": "No art", "cover_action": "remove"})
+    assert status == 200
+    assert inspect_file(track).pictures == []
+
+
+def test_bad_cover_is_rejected(server) -> None:
+    running, _library, _track = server
+    status, _payload = _post(
+        running,
+        "/api/tracks/1",
+        {"title": "x", "cover_action": "set", "cover": "data:image/jpeg;base64,bm90IGFuIGltYWdl"},
+    )
+    assert status == 400
+
+
+def test_cover_can_apply_to_whole_album(server) -> None:
+    import base64
+    import io
+    import shutil
+
+    from PIL import Image
+
+    from choreia.core import inspect_file
+
+    running, library, track = server
+    second = track.parent / "second.mp3"
+    shutil.copy2(track, second)
+    library.upsert_track(path=str(second), title="Second", album="Album X", album_artist="Artist")
+    library.upsert_track(path=str(track), title="First", album="Album X", album_artist="Artist")
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (1000, 1000), (10, 120, 10)).save(buffer, "JPEG")
+    encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+    status, payload = _post(
+        running,
+        "/api/tracks/1",
+        {
+            "title": "First",
+            "album": "Album X",
+            "album_artist": "Artist",
+            "cover_action": "set",
+            "cover": f"data:image/jpeg;base64,{encoded}",
+            "apply_to_album": True,
+        },
+    )
+
+    assert status == 200
+    assert payload["album_updated"] == 1
+    assert len(inspect_file(track).pictures) == 1
+    assert len(inspect_file(second).pictures) == 1
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

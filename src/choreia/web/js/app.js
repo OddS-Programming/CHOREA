@@ -14,9 +14,11 @@ const state = {
   folders: [],
   scanTimer: null,
   editing: null,
+  editCover: { action: "keep", dataUrl: null },
   lyrics: null,
   lyricLines: [],
-  lyricsFollow: true,
+  lyricIndex: -1,
+  followPauseUntil: 0,
   loading: true,
 };
 
@@ -43,6 +45,7 @@ const el = {
   now: document.getElementById("now"),
   nowplaying: document.getElementById("nowplaying"),
   npBackdrop: document.getElementById("np-backdrop"),
+  npExit: document.getElementById("np-exit-zone"),
   npCover: document.getElementById("np-cover"),
   npTitle: document.getElementById("np-title"),
   npArtist: document.getElementById("np-artist"),
@@ -69,7 +72,6 @@ const el = {
   lyricsClose: document.getElementById("lyrics-close"),
   lyricsCancel: document.getElementById("lyrics-cancel"),
   lyricsClear: document.getElementById("lyrics-clear"),
-  lyricsFollow: document.getElementById("lyrics-follow"),
   editCurrent: document.getElementById("edit-current"),
   editModal: document.getElementById("edit-modal"),
   editForm: document.getElementById("edit-form"),
@@ -78,6 +80,12 @@ const el = {
   editClose: document.getElementById("edit-close"),
   editCancel: document.getElementById("edit-cancel"),
   editSave: document.getElementById("edit-save"),
+  editCoverPreview: document.getElementById("edit-cover-preview"),
+  editCoverPick: document.getElementById("edit-cover-pick"),
+  editCoverRemove: document.getElementById("edit-cover-remove"),
+  editCoverFile: document.getElementById("edit-cover-file"),
+  editCoverHint: document.getElementById("edit-cover-hint"),
+  editCoverAlbum: document.getElementById("edit-cover-album"),
   spectrum: document.getElementById("spectrum"),
   toast: document.getElementById("toast"),
   addFolder: document.getElementById("add-folder"),
@@ -272,11 +280,11 @@ function updateNow(track) {
   setCover(el.nowCover, track, 320);
   setCover(el.npCover, track, 640);
   if (track.cover_hash) {
+    el.npBackdrop.classList.remove("plain");
     el.npBackdrop.style.backgroundImage = `url("${API.thumb(track.cover_hash, 320)}")`;
-    requestAnimationFrame(() => el.npBackdrop.classList.add("ready"));
   } else {
     el.npBackdrop.style.backgroundImage = "";
-    el.npBackdrop.classList.remove("ready");
+    el.npBackdrop.classList.add("plain");
   }
   document.title = `${track.title || "χορεία"} — χορεία`;
   syncTransport();
@@ -378,7 +386,7 @@ function openNowPlaying() {
   document.body.classList.add("np-open");
   startSpectrum();
   requestAnimationFrame(() => {
-    if (state.lyricsFollow) scrollToActive();
+    if (state.lyricIndex >= 0) scrollToLine(state.lyricIndex, false);
   });
 }
 
@@ -561,7 +569,12 @@ function openEditor(trackId) {
     return;
   }
   state.editing = track;
+  state.editCover = { action: "keep", dataUrl: null };
   el.editFile.textContent = track.path;
+  el.editCoverFile.value = "";
+  el.editCoverAlbum.checked = false;
+  setEditCoverPreview(track.cover_hash ? API.thumb(track.cover_hash, 320) : "");
+  el.editCoverHint.textContent = track.cover_hash ? "Текущая обложка" : "JPG или PNG, квадрат от 1000×1000";
   el.editFields.innerHTML = EDIT_FIELDS.map(([key, label]) => `
     <div class="field">
       <label for="edit-${key}">${label}</label>
@@ -571,9 +584,14 @@ function openEditor(trackId) {
   requestAnimationFrame(() => el.editFields.querySelector("input")?.focus());
 }
 
+function setEditCoverPreview(url) {
+  el.editCoverPreview.style.backgroundImage = url ? `url("${url}")` : "";
+}
+
 function closeEditor() {
   el.editModal.hidden = true;
   state.editing = null;
+  state.editCover = { action: "keep", dataUrl: null };
 }
 
 async function saveEditor(event) {
@@ -583,6 +601,11 @@ async function saveEditor(event) {
   el.editFields.querySelectorAll("input").forEach((input) => {
     payload[input.dataset.key] = input.value;
   });
+  payload.cover_action = state.editCover.action;
+  payload.apply_to_album = state.editCover.action === "set" && el.editCoverAlbum.checked;
+  if (state.editCover.action === "set" && state.editCover.dataUrl) {
+    payload.cover = state.editCover.dataUrl;
+  }
   el.editSave.disabled = true;
   el.editSave.textContent = "Сохраняю…";
   try {
@@ -594,7 +617,11 @@ async function saveEditor(event) {
     closeEditor();
     renderLibrary();
     syncTransport();
-    toast("Метаданные записаны, файл сохранён");
+    toast(
+      response.album_updated
+        ? `Обложка записана во весь альбом, файлов: ${response.album_updated + 1}`
+        : "Метаданные записаны, файл сохранён"
+    );
   } catch (error) {
     toast(`Не удалось сохранить: ${error.message}`);
   } finally {
@@ -607,8 +634,8 @@ async function saveEditor(event) {
 async function loadLyrics(trackId) {
   state.lyrics = null;
   state.lyricLines = [];
-  state.lyricsFollow = true;
-  el.lyricsFollow.hidden = true;
+  state.lyricIndex = -1;
+  state.followPauseUntil = 0;
   try {
     const data = await API.get(`lyrics/${trackId}`);
     state.lyrics = data.lyrics;
@@ -624,9 +651,6 @@ function renderLyrics() {
     state.lyrics && ((state.lyrics.synced || "").trim() || (state.lyrics.plain || "").trim())
   );
   el.npBody.classList.toggle("with-lyrics", hasText);
-  if (!hasText) {
-    el.lyricsFollow.hidden = true;
-  }
   if (!state.lyrics) {
     box.innerHTML = '<div class="lyrics-empty">Текста нет — нажмите кнопку текста внизу.</div>';
     return;
@@ -644,25 +668,27 @@ function renderLyrics() {
       }
     }
     state.lyricLines = lines;
-    box.innerHTML = lines
-      .map((line) => `<div class="lyric-line" data-time="${line.time}">${escapeHtml(line.text || "♪")}</div>`)
-      .join("");
+    box.innerHTML = '<div class="lyrics-spacer"></div>' +
+      lines
+        .map((line) => `<div class="lyric-line" data-time="${line.time}">${escapeHtml(line.text || "♪")}</div>`)
+        .join("") +
+      '<div class="lyrics-spacer"></div>';
+    state.lyricIndex = -1;
     syncLyric();
-    if (state.lyricsFollow) requestAnimationFrame(scrollToActive);
   } else {
     box.innerHTML = `<div class="lyrics-plain">${escapeHtml(state.lyrics.plain || "")}</div>`;
   }
 }
 
-function scrollToActive() {
-  const active = el.npLyrics.querySelector(".lyric-line.active");
-  if (active) active.scrollIntoView({ block: "center", behavior: "smooth" });
-}
-
-function setFollow(value) {
-  state.lyricsFollow = value;
-  el.lyricsFollow.hidden = value;
-  if (value) scrollToActive();
+function scrollToLine(index, smooth = true) {
+  const nodes = el.npLyrics.querySelectorAll(".lyric-line");
+  const node = nodes[index];
+  if (!node) return;
+  const containerRect = el.npLyrics.getBoundingClientRect();
+  const nodeRect = node.getBoundingClientRect();
+  const delta = nodeRect.top - containerRect.top;
+  const top = el.npLyrics.scrollTop + delta - (el.npLyrics.clientHeight - node.clientHeight) / 2;
+  el.npLyrics.scrollTo({ top, behavior: smooth ? "smooth" : "auto" });
 }
 
 function syncLyric() {
@@ -673,10 +699,13 @@ function syncLyric() {
     if (state.lyricLines[i].time <= current) index = i;
     else break;
   }
-  const nodes = el.npLyrics.querySelectorAll(".lyric-line");
-  nodes.forEach((node, i) => node.classList.toggle("active", i === index));
-  if (nodes[index] && !el.nowplaying.hidden && state.lyricsFollow) {
-    nodes[index].scrollIntoView({ block: "center", behavior: "smooth" });
+  if (index === state.lyricIndex) return;
+  state.lyricIndex = index;
+  el.npLyrics.querySelectorAll(".lyric-line").forEach((node, i) => {
+    node.classList.toggle("active", i === index);
+  });
+  if (!el.nowplaying.hidden && Date.now() >= state.followPauseUntil) {
+    scrollToLine(index);
   }
 }
 
@@ -805,7 +834,7 @@ el.mute.addEventListener("click", () => {
 });
 
 el.now.addEventListener("click", openNowPlaying);
-el.npClose?.addEventListener("click", closeNowPlaying);
+el.npExit.addEventListener("click", closeNowPlaying);
 el.nowplaying.addEventListener("click", (event) => {
   if (event.target === el.nowplaying || event.target === el.npBackdrop) closeNowPlaying();
 });
@@ -833,6 +862,29 @@ el.npEdit.addEventListener("click", () => openEditor(state.currentId));
 el.editForm.addEventListener("submit", saveEditor);
 el.editClose.addEventListener("click", closeEditor);
 el.editCancel.addEventListener("click", closeEditor);
+
+el.editCoverPick.addEventListener("click", () => el.editCoverFile.click());
+el.editCoverFile.addEventListener("change", () => {
+  const file = el.editCoverFile.files && el.editCoverFile.files[0];
+  if (!file) return;
+  if (file.size > 12_000_000) {
+    toast("Файл больше 12 МБ — уменьшите обложку");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = String(reader.result);
+    state.editCover = { action: "set", dataUrl };
+    setEditCoverPreview(dataUrl);
+    el.editCoverHint.textContent = file.name;
+  };
+  reader.readAsDataURL(file);
+});
+el.editCoverRemove.addEventListener("click", () => {
+  state.editCover = { action: "remove", dataUrl: null };
+  setEditCoverPreview("");
+  el.editCoverHint.textContent = "Обложка будет удалена из файла";
+});
 el.editModal.addEventListener("click", (event) => {
   if (event.target === el.editModal) closeEditor();
 });
@@ -846,9 +898,12 @@ el.lyricsModal.addEventListener("click", (event) => {
   if (event.target === el.lyricsModal) closeLyricsEditor();
 });
 
-el.lyricsFollow.addEventListener("click", () => setFollow(true));
-el.npLyrics.addEventListener("wheel", () => setFollow(false), { passive: true });
-el.npLyrics.addEventListener("touchmove", () => setFollow(false), { passive: true });
+el.npLyrics.addEventListener("wheel", () => {
+  state.followPauseUntil = Date.now() + 3000;
+}, { passive: true });
+el.npLyrics.addEventListener("touchmove", () => {
+  state.followPauseUntil = Date.now() + 3000;
+}, { passive: true });
 el.npLyrics.addEventListener("click", (event) => {
   const line = event.target.closest(".lyric-line");
   if (!line || line.dataset.time === undefined) return;

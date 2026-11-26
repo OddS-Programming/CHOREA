@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 import mimetypes
 import re
@@ -16,6 +18,7 @@ from ..library.db import Library
 from ..library.scanner import Scanner, refresh_track
 from ..library.thumbs import ThumbCache
 from ..core import clean_file, inspect_file
+from ..model import make_picture
 
 AUDIO_TYPES = {
     ".mp3": "audio/mpeg",
@@ -322,13 +325,58 @@ class Handler(BaseHTTPRequestHandler):
         metadata = {
             name: str(payload.get(name, current.fields.get(name, ""))) for name in names
         }
+
+        action = str(payload.get("cover_action") or "keep")
+        keep = current.front_cover
+        if action == "remove":
+            keep = None
+        elif action == "set":
+            raw = str(payload.get("cover") or "")
+            if not raw:
+                self._error(400, "cover data required")
+                return
+            try:
+                data = base64.b64decode(raw.split(",")[-1])
+            except Exception:
+                self._error(400, "bad cover data")
+                return
+            if len(data) > 12_000_000:
+                self._error(413, "cover too large")
+                return
+            try:
+                from PIL import Image
+
+                with Image.open(io.BytesIO(data)) as probe:
+                    probe.verify()
+            except Exception:
+                self._error(400, "not an image")
+                return
+            keep = make_picture(0, data, type=3, desc="Cover", source="file")
+
         try:
-            clean_file(source, keep=current.front_cover, metadata=metadata)
+            clean_file(source, keep=keep, metadata=metadata)
             updated = refresh_track(library, self.context.thumbs, source)
         except Exception as exc:
             self._error(500, f"cannot write: {exc}")
             return
-        self._json({"track": updated})
+
+        album_updated = 0
+        if action == "set" and payload.get("apply_to_album") and metadata["album"].strip():
+            for other in library.album_tracks(metadata["album"], metadata.get("album_artist", "")):
+                if other["path"] == str(source):
+                    continue
+                other_path = Path(other["path"])
+                if not other_path.exists():
+                    continue
+                try:
+                    other_report = inspect_file(other_path)
+                    clean_file(other_path, keep=keep, metadata=other_report.fields)
+                    refresh_track(library, self.context.thumbs, other_path)
+                    album_updated += 1
+                except Exception:
+                    continue
+
+        self._json({"track": updated, "album_updated": album_updated})
 
     def _save_lyrics(self, track_id: int) -> None:
         library = self.context.library

@@ -221,6 +221,18 @@ class Library:
             )
             self._conn.commit()
 
+    def album_tracks(self, album: str, album_artist: str = "") -> list[dict]:
+        if not album.strip():
+            return []
+        sql = "SELECT * FROM tracks WHERE album = ? COLLATE NOCASE"
+        params: list = [album]
+        if album_artist.strip():
+            sql += " AND album_artist = ? COLLATE NOCASE"
+            params.append(album_artist)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
     def tracks_under(self, folder_path: str) -> Iterable[dict]:
         prefix = folder_path.rstrip("\\/") + "%"
         with self._lock:

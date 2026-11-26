@@ -87,6 +87,7 @@
 
 <div class="nowplaying" id="nowplaying" hidden>
   <div class="np-backdrop" id="np-backdrop"></div>
+  <div class="np-exit-zone" id="np-exit-zone" title="Выйти из полноэкранного режима"></div>
   <div class="np-body" id="np-body">
     <div class="np-left">
       <div class="np-cover" id="np-cover"></div>
@@ -117,7 +118,6 @@
     </div>
     <div class="np-right">
       <div class="np-lyrics" id="np-lyrics"></div>
-      <button class="lyrics-follow" id="lyrics-follow" hidden>К текущей строке</button>
     </div>
   </div>
 </div>
@@ -129,6 +129,16 @@
       <button type="button" class="icon-btn" id="edit-close" title="Закрыть">✕</button>
     </div>
     <div class="modal-file" id="edit-file"></div>
+    <div class="modal-cover">
+      <div class="modal-cover-preview" id="edit-cover-preview"></div>
+      <div class="modal-cover-actions">
+        <button type="button" class="ghost" id="edit-cover-pick">Выбрать обложку…</button>
+        <button type="button" class="ghost" id="edit-cover-remove">Убрать обложку</button>
+        <label class="check"><input type="checkbox" id="edit-cover-album"> Ко всему альбому</label>
+        <div class="hint" id="edit-cover-hint">JPG или PNG, квадрат от 1000×1000</div>
+      </div>
+      <input type="file" id="edit-cover-file" accept="image/*" hidden>
+    </div>
     <div class="modal-grid" id="edit-fields"></div>
     <div class="modal-actions">
       <button type="button" class="ghost" id="edit-cancel">Отмена</button>
