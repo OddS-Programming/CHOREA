@@ -263,6 +263,38 @@ class Library:
             self._conn.commit()
         return removed
 
+    # ---------------------------------------------------------------- lyrics
+    def lyrics(self, track_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM lyrics WHERE track_id=?", (track_id,)).fetchone()
+        return dict(row) if row else None
+
+    def set_lyrics(
+        self,
+        track_id: int,
+        *,
+        plain: str,
+        synced: str | None = None,
+        source: str = "manual",
+        instrumental: bool = False,
+    ) -> None:
+        import time
+
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO lyrics (track_id, source, synced, plain, instrumental, fetched_at) "
+                "VALUES (?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(track_id) DO UPDATE SET source=excluded.source, synced=excluded.synced, "
+                "plain=excluded.plain, instrumental=excluded.instrumental, fetched_at=excluded.fetched_at",
+                (track_id, source, synced, plain, 1 if instrumental else 0, time.time()),
+            )
+            self._conn.commit()
+
+    def delete_lyrics(self, track_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM lyrics WHERE track_id=?", (track_id,))
+            self._conn.commit()
+
     # -------------------------------------------------------------- settings
     def setting(self, key: str, default: str | None = None) -> str | None:
         with self._lock:

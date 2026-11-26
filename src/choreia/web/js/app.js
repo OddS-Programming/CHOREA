@@ -14,6 +14,8 @@ const state = {
   folders: [],
   scanTimer: null,
   editing: null,
+  lyrics: null,
+  lyricLines: [],
 };
 
 const el = {
@@ -52,7 +54,18 @@ const el = {
   npSeek: document.getElementById("np-seek"),
   npElapsed: document.getElementById("np-elapsed"),
   npDuration: document.getElementById("np-duration"),
+  npMute: document.getElementById("np-mute"),
+  npVolume: document.getElementById("np-volume"),
   npEdit: document.getElementById("np-edit"),
+  npLyrics: document.getElementById("np-lyrics"),
+  npLyricsEdit: document.getElementById("np-lyrics-edit"),
+  lyricsModal: document.getElementById("lyrics-modal"),
+  lyricsForm: document.getElementById("lyrics-form"),
+  lyricsText: document.getElementById("lyrics-text"),
+  lyricsFile: document.getElementById("lyrics-file"),
+  lyricsClose: document.getElementById("lyrics-close"),
+  lyricsCancel: document.getElementById("lyrics-cancel"),
+  lyricsClear: document.getElementById("lyrics-clear"),
   editCurrent: document.getElementById("edit-current"),
   editModal: document.getElementById("edit-modal"),
   editForm: document.getElementById("edit-form"),
@@ -203,6 +216,7 @@ function playTrack(id) {
   el.audio.src = API.media(id);
   el.audio.play().catch(() => {});
   updateNow(track);
+  loadLyrics(id);
   updatePlayingMark();
   if (window.pywebview?.api?.played) window.pywebview.api.played(id).catch(() => {});
 }
@@ -308,6 +322,12 @@ function syncTransport() {
     elapsed.textContent = formatTime(el.audio.currentTime);
     total.textContent = formatTime(duration);
   }
+
+  el.npVolume.value = String(Math.round(el.audio.volume * 100));
+  const muteIcon = el.audio.muted ? "▯" : "▮";
+  el.mute.textContent = muteIcon;
+  el.npMute.textContent = muteIcon;
+  syncLyric();
 }
 
 /* ------------------------------------------------------------- now playing */
@@ -539,6 +559,104 @@ async function saveEditor(event) {
   }
 }
 
+/* ---------------------------------------------------------------- lyrics */
+async function loadLyrics(trackId) {
+  state.lyrics = null;
+  state.lyricLines = [];
+  try {
+    const data = await API.get(`lyrics/${trackId}`);
+    state.lyrics = data.lyrics;
+  } catch (error) {
+    state.lyrics = null;
+  }
+  renderLyrics();
+}
+
+function renderLyrics() {
+  const box = el.npLyrics;
+  if (!state.lyrics) {
+    box.innerHTML = '<div class="lyrics-empty">Текста нет — нажмите ☰, чтобы добавить.</div>';
+    return;
+  }
+  const synced = state.lyrics.synced;
+  if (synced) {
+    const lines = [];
+    for (const raw of synced.split("\n")) {
+      const match = raw.match(/^\[(\d{1,3}):(\d{1,2}(?:[.,]\d{1,3})?)\]\s*(.*)$/);
+      if (match) {
+        lines.push({
+          time: Number(match[1]) * 60 + Number(match[2].replace(",", ".")),
+          text: match[3].trim(),
+        });
+      }
+    }
+    state.lyricLines = lines;
+    box.innerHTML = lines
+      .map((line) => `<div class="lyric-line">${escapeHtml(line.text || "♪")}</div>`)
+      .join("");
+    syncLyric();
+  } else {
+    box.innerHTML = `<div class="lyrics-plain">${escapeHtml(state.lyrics.plain || "")}</div>`;
+  }
+}
+
+function syncLyric() {
+  if (!state.lyricLines.length) return;
+  const current = el.audio.currentTime;
+  let index = 0;
+  for (let i = 0; i < state.lyricLines.length; i += 1) {
+    if (state.lyricLines[i].time <= current) index = i;
+    else break;
+  }
+  const nodes = el.npLyrics.querySelectorAll(".lyric-line");
+  nodes.forEach((node, i) => node.classList.toggle("active", i === index));
+  if (nodes[index] && !el.nowplaying.hidden) {
+    nodes[index].scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+}
+
+function openLyricsEditor() {
+  const track = trackById(state.currentId);
+  if (!track) {
+    toast("Сначала включите трек");
+    return;
+  }
+  el.lyricsFile.textContent = `${track.artist || ""} — ${track.title || ""}`;
+  el.lyricsText.value = state.lyrics ? state.lyrics.synced || state.lyrics.plain || "" : "";
+  el.lyricsModal.hidden = false;
+  requestAnimationFrame(() => el.lyricsText.focus());
+}
+
+function closeLyricsEditor() {
+  el.lyricsModal.hidden = true;
+}
+
+async function saveLyrics(event) {
+  event.preventDefault();
+  if (!state.currentId) return;
+  try {
+    await API.post(`lyrics/${state.currentId}`, { text: el.lyricsText.value });
+    closeLyricsEditor();
+    await loadLyrics(state.currentId);
+    toast("Текст сохранён");
+  } catch (error) {
+    toast(`Не удалось сохранить текст: ${error.message}`);
+  }
+}
+
+async function clearLyrics() {
+  if (!state.currentId) return;
+  if (!window.confirm("Удалить текст у этого трека?")) return;
+  try {
+    await API.del(`lyrics/${state.currentId}`);
+    closeLyricsEditor();
+    await loadLyrics(state.currentId);
+    toast("Текст удалён");
+  } catch (error) {
+    toast(`Не удалось удалить текст: ${error.message}`);
+  }
+}
+
 /* ---------------------------------------------------------------- wiring */
 el.view.addEventListener("click", (event) => {
   const remove = event.target.closest(".row-remove");
@@ -636,6 +754,14 @@ el.npSeek.addEventListener("input", () => {
   const duration = el.audio.duration || 0;
   if (duration) el.audio.currentTime = (Number(el.npSeek.value) / 1000) * duration;
 });
+el.npVolume.addEventListener("input", () => {
+  el.audio.volume = Number(el.npVolume.value) / 100;
+  el.volume.value = el.npVolume.value;
+});
+el.npMute.addEventListener("click", () => {
+  el.audio.muted = !el.audio.muted;
+  syncTransport();
+});
 
 el.editCurrent.addEventListener("click", () => openEditor(state.currentId));
 el.npEdit.addEventListener("click", () => openEditor(state.currentId));
@@ -644,6 +770,15 @@ el.editClose.addEventListener("click", closeEditor);
 el.editCancel.addEventListener("click", closeEditor);
 el.editModal.addEventListener("click", (event) => {
   if (event.target === el.editModal) closeEditor();
+});
+
+el.npLyricsEdit.addEventListener("click", openLyricsEditor);
+el.lyricsForm.addEventListener("submit", saveLyrics);
+el.lyricsClose.addEventListener("click", closeLyricsEditor);
+el.lyricsCancel.addEventListener("click", closeLyricsEditor);
+el.lyricsClear.addEventListener("click", clearLyrics);
+el.lyricsModal.addEventListener("click", (event) => {
+  if (event.target === el.lyricsModal) closeLyricsEditor();
 });
 
 document.addEventListener("keydown", (event) => {
@@ -655,7 +790,8 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "KeyP") nextTrack(-1);
   if (event.code === "KeyM") { el.audio.muted = !el.audio.muted; el.mute.textContent = el.audio.muted ? "▯" : "▮"; }
   if (event.code === "Escape") {
-    if (!el.editModal.hidden) closeEditor();
+    if (!el.lyricsModal.hidden) closeLyricsEditor();
+    else if (!el.editModal.hidden) closeEditor();
     else closeNowPlaying();
   }
   if (event.key === "/") { event.preventDefault(); el.search.focus(); }

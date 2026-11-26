@@ -476,6 +476,7 @@ button { font: inherit; color: inherit; }
 .np-controls .play-btn { width: 54px; height: 54px; font-size: 20px; }
 .np-seek-row { display: flex; align-items: center; gap: 12px; width: min(560px, 82vw); }
 .np-seek-row .seek { flex: 1; }
+.np-volume { width: 92px; }
 .np-actions { display: flex; gap: 10px; }
 
 .np-backdrop::after {
@@ -571,6 +572,37 @@ body.np-open .player { visibility: hidden; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .modal-save { width: auto; padding: 0 22px; height: 42px; border-radius: 12px; }
+
+.lyrics-input {
+  min-height: 240px;
+  resize: vertical;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: 13px/1.55 "Segoe UI", sans-serif;
+  outline: none;
+}
+
+.lyrics-input:focus { border-color: var(--accent); }
+
+.lyric-line {
+  color: var(--dim);
+  padding: 3px 0;
+  opacity: 0.55;
+  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease;
+}
+
+.lyric-line.active {
+  color: var(--text);
+  opacity: 1;
+  transform: scale(1.04);
+  font-weight: 600;
+}
+
+.lyrics-plain { white-space: pre-line; }
+.lyrics-empty { color: var(--dim); font-size: 12px; }
 
 /* -------------------------------------------------------------- animation */
 @keyframes pop {

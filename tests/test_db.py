@@ -62,6 +62,26 @@ def test_folders_are_added_once(tmp_path: Path) -> None:
     library.close()
 
 
+def test_lyrics_roundtrip(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    track_id = library.upsert_track(path="C:/m/1.mp3", title="One")
+
+    assert library.lyrics(track_id) is None
+    library.set_lyrics(track_id, plain="первая строка", synced="[00:01.00] первая строка")
+    saved = library.lyrics(track_id)
+    assert saved["plain"] == "первая строка"
+    assert saved["synced"].startswith("[00:01.00]")
+    assert saved["source"] == "manual"
+
+    library.set_lyrics(track_id, plain="вторая")
+    assert library.lyrics(track_id)["plain"] == "вторая"
+    assert library.lyrics(track_id)["synced"] is None
+
+    library.delete_lyrics(track_id)
+    assert library.lyrics(track_id) is None
+    library.close()
+
+
 def test_delete_tracks_by_path(tmp_path: Path) -> None:
     library = _library(tmp_path)
     library.upsert_track(path="C:/m/1.mp3", title="One")

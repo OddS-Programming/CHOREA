@@ -31,6 +31,15 @@ AUDIO_TYPES = {
 }
 
 CHUNK = 256 * 1024
+LRC_PATTERN = re.compile(r"\[(\d{1,3}):(\d{1,2}(?:[.,]\d{1,3})?)\]")
+
+
+def split_lyrics(text: str) -> tuple[str, str | None]:
+    """Return plain lyrics and the original LRC text when it carries timestamps."""
+    stripped = text.strip()
+    timed = bool(LRC_PATTERN.search(stripped))
+    plain = "\n".join(LRC_PATTERN.sub("", line).strip() for line in stripped.splitlines()).strip()
+    return plain or stripped, (stripped if timed else None)
 
 
 class ScanState:
@@ -243,6 +252,11 @@ class Handler(BaseHTTPRequestHandler):
             self._update_track(int(track_match.group(1)))
             return
 
+        lyrics_match = re.match(r"^/api/lyrics/(\d+)$", path)
+        if lyrics_match:
+            self._save_lyrics(int(lyrics_match.group(1)))
+            return
+
         if path == "/api/folders":
             payload = self._read_json()
             folder = Path(payload.get("path", ""))
@@ -282,6 +296,11 @@ class Handler(BaseHTTPRequestHandler):
             removed = self.context.library.remove_folder(int(match.group(1)))
             self._json({"ok": True, "removed": removed})
             return
+        lyrics_match = re.match(r"^/api/lyrics/(\d+)$", path)
+        if lyrics_match:
+            self.context.library.delete_lyrics(int(lyrics_match.group(1)))
+            self._json({"ok": True})
+            return
         self._error(404, "not found")
 
     # ----------------------------------------------------------------- parts
@@ -311,8 +330,31 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._json({"track": updated})
 
+    def _save_lyrics(self, track_id: int) -> None:
+        library = self.context.library
+        if library.track(track_id) is None:
+            self._error(404, "no track")
+            return
+        body = self._read_json()
+        text = str(body.get("text", ""))
+        if not text.strip():
+            library.delete_lyrics(track_id)
+            self._json({"ok": True, "deleted": True})
+            return
+        plain, synced = split_lyrics(text)
+        library.set_lyrics(track_id, plain=plain, synced=synced)
+        self._json({"lyrics": library.lyrics(track_id)})
+
     def _api(self, route: str, query: dict[str, list[str]]) -> None:
         library = self.context.library
+        if route.startswith("lyrics/"):
+            raw_id = route.split("/", 1)[1]
+            if not raw_id.isdigit():
+                self._error(400, "bad id")
+                return
+            payload = library.lyrics(int(raw_id))
+            self._json({"lyrics": payload})
+            return
         if route == "tracks":
             sort = (query.get("sort") or ["artist"])[0]
             search = (query.get("q") or [""])[0]

@@ -102,12 +102,15 @@
       <button class="play-btn" id="np-play" title="Играть">▶</button>
       <button class="icon-btn" id="np-next" title="Следующий">⏭</button>
       <button class="icon-btn" id="np-repeat" title="Повтор">↻</button>
+      <button class="icon-btn" id="np-lyrics-edit" title="Текст песни">☰</button>
     </div>
 
     <div class="np-seek-row">
       <span class="time" id="np-elapsed">0:00</span>
       <input class="seek" id="np-seek" type="range" min="0" max="1000" value="0" step="1">
       <span class="time" id="np-duration">0:00</span>
+      <button class="icon-btn" id="np-mute" title="Звук">▮</button>
+      <input class="volume np-volume" id="np-volume" type="range" min="0" max="100" value="80" step="1">
     </div>
 
     <div class="np-actions">
@@ -129,6 +132,22 @@
     <div class="modal-actions">
       <button type="button" class="ghost" id="edit-cancel">Отмена</button>
       <button type="submit" class="play-btn modal-save" id="edit-save">Сохранить</button>
+    </div>
+  </form>
+</div>
+
+<div class="modal" id="lyrics-modal" hidden>
+  <form class="modal-card" id="lyrics-form">
+    <div class="modal-head">
+      <div class="modal-title">Текст песни</div>
+      <button type="button" class="icon-btn" id="lyrics-close" title="Закрыть">✕</button>
+    </div>
+    <div class="modal-file" id="lyrics-file"></div>
+    <textarea class="lyrics-input" id="lyrics-text" placeholder="Вставьте текст. Для синхронизации с музыкой используйте LRC:&#10;[00:12.34] первая строка&#10;[00:16.00] вторая строка"></textarea>
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="lyrics-clear">Удалить текст</button>
+      <button type="button" class="ghost" id="lyrics-cancel">Отмена</button>
+      <button type="submit" class="play-btn modal-save">Сохранить</button>
     </div>
   </form>
 </div>

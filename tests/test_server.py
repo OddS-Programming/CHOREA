@@ -136,6 +136,40 @@ def test_folder_can_be_added_and_removed(server, tmp_path) -> None:
     assert json.loads(body)["folders"] == []
 
 
+def test_lyrics_are_saved_and_read(server) -> None:
+    running, _library, _track = server
+    status, payload = _post(
+        running,
+        "/api/lyrics/1",
+        {"text": "[00:01.00] Первая строка\n[00:05.50] Вторая строка"},
+    )
+    assert status == 200
+    assert payload["lyrics"]["synced"].startswith("[00:01.00]")
+    assert payload["lyrics"]["plain"].splitlines() == ["Первая строка", "Вторая строка"]
+
+    status, _headers, body = _get(running, "/api/lyrics/1", {"X-Token": running.context.token})
+    assert status == 200
+    assert json.loads(body)["lyrics"]["plain"].splitlines()[0] == "Первая строка"
+
+
+def test_plain_lyrics_have_no_synced_block(server) -> None:
+    running, _library, _track = server
+    status, payload = _post(running, "/api/lyrics/1", {"text": "Просто текст без таймкодов"})
+    assert status == 200
+    assert payload["lyrics"]["synced"] is None
+    assert payload["lyrics"]["plain"] == "Просто текст без таймкодов"
+
+
+def test_lyrics_can_be_deleted(server) -> None:
+    running, _library, _track = server
+    _post(running, "/api/lyrics/1", {"text": "строка"})
+    status, payload = _post(running, "/api/lyrics/1", {"text": ""})
+    assert status == 200 and payload["deleted"] is True
+    status, _headers, body = _get(running, "/api/lyrics/1", {"X-Token": running.context.token})
+    assert status == 200
+    assert json.loads(body)["lyrics"] is None
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 
