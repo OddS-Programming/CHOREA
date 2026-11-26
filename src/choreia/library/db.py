@@ -311,6 +311,72 @@ class Library:
             self._conn.execute("DELETE FROM lyrics WHERE track_id=?", (track_id,))
             self._conn.commit()
 
+    # ------------------------------------------------------------- playlists
+    def playlists(self) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT p.id, p.name, p.created_at, COUNT(pt.track_id) AS tracks "
+                "FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id "
+                "GROUP BY p.id ORDER BY p.name COLLATE NOCASE"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def playlist(self, playlist_id: int) -> dict | None:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM playlists WHERE id=?", (playlist_id,)).fetchone()
+        return dict(row) if row else None
+
+    def create_playlist(self, name: str) -> int:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO playlists (name, created_at) VALUES (?, strftime('%s','now'))", (name,)
+            )
+            self._conn.commit()
+            row = self._conn.execute("SELECT id FROM playlists WHERE name=?", (name,)).fetchone()
+        return int(row["id"]) if row else 0
+
+    def delete_playlist(self, playlist_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM playlists WHERE id=?", (playlist_id,))
+            self._conn.commit()
+
+    def playlist_tracks(self, playlist_id: int) -> list[dict]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT t.*, pt.position FROM playlist_tracks pt "
+                "JOIN tracks t ON t.id = pt.track_id "
+                "WHERE pt.playlist_id = ? ORDER BY pt.position",
+                (playlist_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def add_to_playlist(self, playlist_id: int, track_id: int) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(position) + 1, 0) AS pos FROM playlist_tracks WHERE playlist_id=?",
+                (playlist_id,),
+            ).fetchone()
+            position = int(row["pos"])
+            self._conn.execute(
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                (playlist_id, track_id, position),
+            )
+            self._conn.commit()
+        return position
+
+    def remove_from_playlist(self, playlist_id: int, position: int) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM playlist_tracks WHERE playlist_id=? AND position=?",
+                (playlist_id, position),
+            )
+            self._conn.execute(
+                "UPDATE playlist_tracks SET position = position - 1 "
+                "WHERE playlist_id=? AND position > ?",
+                (playlist_id, position),
+            )
+            self._conn.commit()
+
     # -------------------------------------------------------------- settings
     def setting(self, key: str, default: str | None = None) -> str | None:
         with self._lock:

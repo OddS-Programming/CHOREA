@@ -82,6 +82,28 @@ def test_lyrics_roundtrip(tmp_path: Path) -> None:
     library.close()
 
 
+def test_playlists(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    first = library.upsert_track(path="C:/m/1.mp3", title="One")
+    second = library.upsert_track(path="C:/m/2.mp3", title="Two")
+
+    playlist_id = library.create_playlist("Mix")
+    assert library.playlists()[0]["tracks"] == 0
+
+    library.add_to_playlist(playlist_id, first)
+    library.add_to_playlist(playlist_id, second)
+    assert [track["title"] for track in library.playlist_tracks(playlist_id)] == ["One", "Two"]
+
+    library.remove_from_playlist(playlist_id, 0)
+    tracks = library.playlist_tracks(playlist_id)
+    assert [track["title"] for track in tracks] == ["Two"]
+    assert [track["position"] for track in tracks] == [0]
+
+    library.delete_playlist(playlist_id)
+    assert library.playlists() == []
+    library.close()
+
+
 def test_delete_tracks_by_path(tmp_path: Path) -> None:
     library = _library(tmp_path)
     library.upsert_track(path="C:/m/1.mp3", title="One")

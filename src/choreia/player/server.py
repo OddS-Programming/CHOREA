@@ -261,6 +261,37 @@ class Handler(BaseHTTPRequestHandler):
             self._save_lyrics(int(lyrics_match.group(1)))
             return
 
+        if path == "/api/playlists":
+            payload = self._read_json()
+            name = str(payload.get("name", "")).strip()
+            if not name:
+                self._error(400, "name required")
+                return
+            import sqlite3
+
+            try:
+                playlist_id = self.context.library.create_playlist(name)
+            except sqlite3.IntegrityError:
+                self._error(409, "playlist exists")
+                return
+            self._json({"id": playlist_id, "name": name})
+            return
+
+        playlist_track = re.match(r"^/api/playlists/(\d+)/tracks$", path)
+        if playlist_track:
+            payload = self._read_json()
+            playlist_id = int(playlist_track.group(1))
+            track_id = int(payload.get("track_id") or 0)
+            if self.context.library.playlist(playlist_id) is None:
+                self._error(404, "no playlist")
+                return
+            if self.context.library.track(track_id) is None:
+                self._error(404, "no track")
+                return
+            position = self.context.library.add_to_playlist(playlist_id, track_id)
+            self._json({"ok": True, "position": position})
+            return
+
         if path == "/api/pick-folder":
             from .dialogs import pick_folder
 
@@ -322,6 +353,20 @@ class Handler(BaseHTTPRequestHandler):
         lyrics_match = re.match(r"^/api/lyrics/(\d+)$", path)
         if lyrics_match:
             self.context.library.delete_lyrics(int(lyrics_match.group(1)))
+            self._json({"ok": True})
+            return
+
+        playlist_match = re.match(r"^/api/playlists/(\d+)/tracks/(\d+)$", path)
+        if playlist_match:
+            self.context.library.remove_from_playlist(
+                int(playlist_match.group(1)), int(playlist_match.group(2))
+            )
+            self._json({"ok": True})
+            return
+
+        playlist_match = re.match(r"^/api/playlists/(\d+)$", path)
+        if playlist_match:
+            self.context.library.delete_playlist(int(playlist_match.group(1)))
             self._json({"ok": True})
             return
         self._error(404, "not found")
@@ -415,6 +460,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api(self, route: str, query: dict[str, list[str]]) -> None:
         library = self.context.library
+        if route == "playlists":
+            self._json({"playlists": library.playlists()})
+            return
+        playlist_match = re.match(r"^playlists/(\d+)$", route)
+        if playlist_match:
+            playlist_id = int(playlist_match.group(1))
+            playlist = library.playlist(playlist_id)
+            if playlist is None:
+                self._error(404, "no playlist")
+                return
+            self._json({"playlist": playlist, "tracks": library.playlist_tracks(playlist_id)})
+            return
         if route.startswith("lyrics/"):
             raw_id = route.split("/", 1)[1]
             if not raw_id.isdigit():

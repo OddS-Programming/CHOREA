@@ -253,6 +253,26 @@ def test_reveal_missing_path(server, tmp_path) -> None:
     assert status == 404
 
 
+def test_playlist_api(server) -> None:
+    running, _library, _track = server
+    status, payload = _post(running, "/api/playlists", {"name": "Mix"})
+    assert status == 200
+    playlist_id = payload["id"]
+
+    status, _payload = _post(running, f"/api/playlists/{playlist_id}/tracks", {"track_id": 1})
+    assert status == 200
+
+    status, _headers, body = _get(
+        running, f"/api/playlists/{playlist_id}", {"X-Token": running.context.token}
+    )
+    assert status == 200
+    data = json.loads(body)
+    assert data["playlist"]["name"] == "Mix"
+    assert [track["id"] for track in data["tracks"]] == [1]
+
+    assert _post(running, "/api/playlists", {"name": "Mix"})[0] == 409
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

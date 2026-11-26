@@ -163,6 +163,7 @@ function rowMarkup(track) {
       </div>
       <div class="row-album">${escapeHtml(track.album || "")}</div>
       <div class="row-time">
+        <button class="row-add" data-add="${track.id}" title="Добавить в плейлист">＋</button>
         <button class="row-edit" data-edit="${track.id}" title="Изменить метаданные">✎</button>
         <span>${formatTime(track.duration)}</span>
       </div>
@@ -485,6 +486,111 @@ async function removeFolder(folderId) {
   }
 }
 
+/* -------------------------------------------------------------- playlists */
+async function renderPlaylists() {
+  let playlists = [];
+  try {
+    playlists = (await API.get("playlists")).playlists;
+  } catch (error) {
+    toast(`Не удалось загрузить плейлисты: ${error.message}`);
+  }
+  const toolbar = '<div class="playlist-toolbar"><button class="ghost" id="playlist-new">＋ Новый плейлист</button></div>';
+  if (!playlists.length) {
+    el.view.innerHTML = `${toolbar}<div class="empty"><div><h2>Плейлистов пока нет</h2>
+      <p>Создайте первый и добавляйте треки кнопкой ＋ в списке.</p></div></div>`;
+    return;
+  }
+  el.view.innerHTML = `${toolbar}<div class="scroll">${playlists.map((playlist) => `
+    <div class="row" data-playlist="${playlist.id}">
+      <div class="row-cover">◈</div>
+      <div class="row-main">
+        <div class="row-title">${escapeHtml(playlist.name)}</div>
+        <div class="row-artist">${playlist.tracks} треков</div>
+      </div>
+      <div class="row-album"></div>
+      <div class="row-time">›</div>
+    </div>`).join("")}</div>`;
+}
+
+async function createPlaylistPrompt() {
+  const name = window.prompt("Название плейлиста");
+  if (!name || !name.trim()) return;
+  try {
+    await API.post("playlists", { name: name.trim() });
+    await renderPlaylists();
+  } catch (error) {
+    toast("Плейлист с таким названием уже есть");
+  }
+}
+
+async function openPlaylist(id) {
+  try {
+    const data = await API.get(`playlists/${id}`);
+    state.playlist = data;
+    state.queue = data.tracks.map((track) => track.id);
+    state.queueIndex = -1;
+    el.crumbs.textContent = data.playlist.name;
+    el.view.innerHTML = `
+      <div class="playlist-toolbar">
+        <button class="ghost" id="playlist-play">▶ Играть</button>
+        <span class="hint">${data.tracks.length} треков</span>
+        <button class="ghost danger" id="playlist-delete">Удалить</button>
+      </div>
+      <div class="scroll">${data.tracks.length
+        ? data.tracks.map(rowMarkup).join("")
+        : '<div class="empty"><div><h2>Пусто</h2><p>Добавьте треки кнопкой ＋ в библиотеке.</p></div></div>'}</div>`;
+  } catch (error) {
+    toast(`Не удалось открыть плейлист: ${error.message}`);
+  }
+}
+
+function closeMenu() {
+  document.querySelectorAll(".menu").forEach((node) => node.remove());
+}
+
+async function openAddMenu(anchor, trackId) {
+  closeMenu();
+  let playlists = [];
+  try {
+    playlists = (await API.get("playlists")).playlists;
+  } catch (error) {
+    playlists = [];
+  }
+  const menu = document.createElement("div");
+  menu.className = "menu";
+  menu.innerHTML =
+    playlists.map((item) => `<button data-to="${item.id}">${escapeHtml(item.name)}</button>`).join("") +
+    '<button data-new="1">＋ Новый плейлист…</button>';
+  const rect = anchor.getBoundingClientRect();
+  menu.style.left = `${Math.max(12, Math.min(rect.left - 160, window.innerWidth - 236))}px`;
+  menu.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 280)}px`;
+  document.body.appendChild(menu);
+
+  menu.addEventListener("click", async (event) => {
+    const button = event.target.closest("button");
+    if (!button) return;
+    try {
+      if (button.dataset.new) {
+        const name = window.prompt("Название плейлиста");
+        if (!name || !name.trim()) return;
+        const created = await API.post("playlists", { name: name.trim() });
+        await API.post(`playlists/${created.id}/tracks`, { track_id: trackId });
+      } else {
+        await API.post(`playlists/${button.dataset.to}/tracks`, { track_id: trackId });
+      }
+      toast("Добавлено в плейлист");
+    } catch (error) {
+      toast(`Не удалось добавить: ${error.message}`);
+    } finally {
+      closeMenu();
+    }
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".menu") && !event.target.closest(".row-add")) closeMenu();
+});
+
 function renderPlaceholder(title, text) {
   el.view.innerHTML = `<div class="empty"><div><h2>${title}</h2><p>${text}</p></div></div>`;
 }
@@ -498,7 +604,7 @@ function switchView(view) {
   el.crumbs.textContent = titles[view] || "";
   if (view === "library") renderLibrary();
   if (view === "folders") renderFolders();
-  if (view === "playlists") renderPlaceholder("Плейлисты", "Появятся на следующем этапе: создание, порядок треков, перетаскивание.");
+  if (view === "playlists") renderPlaylists();
   if (view === "online") renderPlaceholder("Интернет", "Поиск и скачивание с hitmos.fm появятся на этапе 5.");
 }
 
@@ -760,6 +866,34 @@ async function clearLyrics() {
 
 /* ---------------------------------------------------------------- wiring */
 el.view.addEventListener("click", (event) => {
+  const add = event.target.closest(".row-add");
+  if (add) {
+    event.stopPropagation();
+    openAddMenu(add, Number(add.dataset.add));
+    return;
+  }
+  if (event.target.id === "playlist-new") {
+    createPlaylistPrompt();
+    return;
+  }
+  if (event.target.id === "playlist-play") {
+    if (state.queue.length) playTrack(state.queue[0]);
+    return;
+  }
+  if (event.target.id === "playlist-delete" && state.playlist) {
+    if (window.confirm(`Удалить плейлист «${state.playlist.playlist.name}»?`)) {
+      API.del(`playlists/${state.playlist.playlist.id}`).then(() => {
+        state.playlist = null;
+        renderPlaylists();
+      });
+    }
+    return;
+  }
+  const playlistRow = event.target.closest("[data-playlist]");
+  if (playlistRow) {
+    openPlaylist(Number(playlistRow.dataset.playlist));
+    return;
+  }
   const open = event.target.closest(".row-open");
   if (open) {
     event.stopPropagation();
