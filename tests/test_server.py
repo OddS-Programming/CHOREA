@@ -384,6 +384,64 @@ def test_delete_refuses_tracks_outside_library(server, monkeypatch) -> None:
     assert library.track(1) is not None
 
 
+def test_cover_search_then_fetch(server, monkeypatch) -> None:
+    from choreia.sources import covers
+
+    running, _library, _track = server
+    monkeypatch.setattr(
+        covers,
+        "search",
+        lambda artist, album, title, token="", limit=10: [
+            {
+                "source": "iTunes",
+                "label": album,
+                "artist": artist,
+                "thumb": "data:image/jpeg;base64,AAA",
+                "cover": "data:image/jpeg;base64,BBB",
+            }
+        ],
+    )
+
+    status, _headers, body = _get(
+        running,
+        "/api/cover-search?artist=Artist&album=Album&title=Track",
+        {"X-Token": running.context.token},
+    )
+    assert status == 200
+    payload = json.loads(body)
+    assert payload["results"][0]["source"] == "iTunes"
+    assert payload["results"][0]["thumb"] == "data:image/jpeg;base64,AAA"
+
+    key = payload["results"][0]["key"]
+    status, _headers, body = _get(running, f"/api/cover/{key}", {"X-Token": running.context.token})
+    assert status == 200
+    assert json.loads(body)["cover"] == "data:image/jpeg;base64,BBB"
+
+
+def test_cover_search_without_network_results(server, monkeypatch) -> None:
+    from choreia.sources import covers
+
+    running, _library, _track = server
+    monkeypatch.setattr(covers, "search", lambda *args, **kwargs: [])
+
+    status, _headers, body = _get(
+        running,
+        "/api/cover-search?artist=Artist&album=Album&title=Track",
+        {"X-Token": running.context.token},
+    )
+
+    assert status == 200
+    assert json.loads(body)["results"] == []
+
+
+def test_unknown_cover_key_is_404(server) -> None:
+    running, _library, _track = server
+
+    status, _headers, _body = _get(running, "/api/cover/missing", {"X-Token": running.context.token})
+
+    assert status == 404
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

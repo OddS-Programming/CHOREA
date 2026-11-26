@@ -102,6 +102,8 @@ const el = {
   editCoverRemove: document.getElementById("edit-cover-remove"),
   editCoverFile: document.getElementById("edit-cover-file"),
   editCoverHint: document.getElementById("edit-cover-hint"),
+  editCoverFind: document.getElementById("edit-cover-find"),
+  editCoverResults: document.getElementById("edit-cover-results"),
   editCoverAlbum: document.getElementById("edit-cover-album"),
   editMultiHint: document.getElementById("edit-multi-hint"),
   askModal: document.getElementById("ask-modal"),
@@ -1103,6 +1105,8 @@ function openEditorFor(ids) {
   const preview = tracks.find((track) => track.cover_hash);
   setEditCoverPreview(preview ? API.thumb(preview.cover_hash, 320) : "");
   el.editCoverHint.textContent = preview ? "Текущая обложка" : "JPG или PNG, квадрат от 1000×1000";
+  el.editCoverResults.hidden = true;
+  el.editCoverResults.innerHTML = "";
   el.editFields.innerHTML = EDIT_FIELDS.map(([key, label]) => {
     const value = commonValue(tracks, key);
     state.editBaseline[key] = value;
@@ -1118,6 +1122,64 @@ function openEditorFor(ids) {
 
 function setEditCoverPreview(url) {
   el.editCoverPreview.style.backgroundImage = url ? `url("${url}")` : "";
+}
+
+async function findCoverOnline() {
+  const track = state.editing;
+  if (!track) return;
+  const field = (key) => {
+    const input = el.editFields.querySelector(`input[data-key="${key}"]`);
+    const typed = input ? input.value.trim() : "";
+    return typed || String(track[key] || "");
+  };
+  el.editCoverResults.hidden = false;
+  el.editCoverResults.innerHTML = '<div class="hint">Ищу обложки в интернете…</div>';
+  el.editCoverFind.disabled = true;
+  el.editCoverFind.textContent = "Ищу…";
+  try {
+    const data = await API.get("cover-search", {
+      artist: field("artist"),
+      album: field("album"),
+      title: field("title"),
+    });
+    if (!data.results.length) {
+      el.editCoverResults.innerHTML =
+        '<div class="hint">Ничего не нашлось. Заполните исполнителя и альбом и попробуйте снова.</div>';
+      return;
+    }
+    el.editCoverResults.innerHTML = data.results
+      .map(
+        (item) => `
+      <button type="button" class="cover-choice" data-key="${item.key}"
+        title="${escapeHtml(item.source)}${item.label ? ": " + escapeHtml(item.label) : ""}">
+        <img src="${item.thumb}" alt="" loading="lazy">
+        <span>${escapeHtml(item.source)}</span>
+      </button>`
+      )
+      .join("");
+    el.editCoverResults.scrollTop = 0;
+    el.editCoverHint.textContent = "Ваша обложка главнее — найденная применится, только если выбрать её.";
+  } catch (error) {
+    el.editCoverResults.innerHTML =
+      '<div class="hint">Не удалось получить обложки. Проверьте подключение к интернету.</div>';
+  } finally {
+    el.editCoverFind.disabled = false;
+    el.editCoverFind.textContent = "Найти в интернете";
+  }
+}
+
+async function pickOnlineCover(key, button) {
+  try {
+    const data = await API.get(`cover/${key}`);
+    state.editCover = { action: "set", dataUrl: data.cover };
+    setEditCoverPreview(data.cover);
+    el.editCoverResults
+      .querySelectorAll(".cover-choice")
+      .forEach((node) => node.classList.toggle("active", node === button));
+    el.editCoverHint.textContent = "Выбрана обложка из интернета — применится после «Сохранить».";
+  } catch (error) {
+    toast("Не удалось загрузить обложку");
+  }
 }
 
 function closeEditor() {
@@ -1611,6 +1673,11 @@ el.editCoverRemove.addEventListener("click", () => {
   state.editCover = { action: "remove", dataUrl: null };
   setEditCoverPreview("");
   el.editCoverHint.textContent = "Обложка будет удалена из файла";
+});
+el.editCoverFind.addEventListener("click", findCoverOnline);
+el.editCoverResults.addEventListener("click", (event) => {
+  const choice = event.target.closest("[data-key]");
+  if (choice) pickOnlineCover(choice.dataset.key, choice);
 });
 el.editModal.addEventListener("click", (event) => {
   if (event.target === el.editModal) closeEditor();

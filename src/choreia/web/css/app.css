@@ -773,6 +773,38 @@ body.np-open .player { visibility: hidden; }
 .check { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; cursor: pointer; }
 .check input { accent-color: var(--accent); }
 
+.cover-results {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 10px;
+  padding: 10px;
+  max-height: 190px;
+  flex: none;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-1);
+  animation: fade 160ms ease both;
+}
+.cover-results .hint { grid-column: 1 / -1; color: var(--dim); font-size: 12px; }
+.cover-choice {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 6px;
+  padding: 0 0 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms ease;
+}
+.cover-choice img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; display: block; }
+.cover-choice:hover { transform: translateY(-2px); border-color: var(--border); }
+.cover-choice.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--text); }
+
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { color: var(--muted); font-size: 12px; }

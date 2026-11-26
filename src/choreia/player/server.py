@@ -75,6 +75,7 @@ class AppContext:
         self.token = secrets.token_urlsafe(18)
         self.scan = ScanState()
         self._last_prune = 0.0
+        self.covers: dict[str, str] = {}
 
     def maybe_prune(self) -> None:
         """Drop rows for files deleted outside the app, at most every 20 seconds."""
@@ -688,6 +689,42 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(403, "outside the library")
                 return
             self._json(library.browse(normalized))
+            return
+        if route == "cover-search":
+            from ..sources.covers import search as search_covers
+
+            artist = (query.get("artist") or [""])[0]
+            album = (query.get("album") or [""])[0]
+            title = (query.get("title") or [""])[0]
+            token = library.setting("genius_token") or ""
+            try:
+                found = search_covers(artist, album, title, token)
+            except Exception:
+                found = []
+            results = []
+            for item in found:
+                key = secrets.token_urlsafe(8)
+                if len(self.context.covers) > 40:
+                    self.context.covers.pop(next(iter(self.context.covers)), None)
+                self.context.covers[key] = item["cover"]
+                results.append(
+                    {
+                        "key": key,
+                        "source": item["source"],
+                        "label": item["label"],
+                        "artist": item["artist"],
+                        "thumb": item["thumb"],
+                    }
+                )
+            self._json({"results": results})
+            return
+        cover_match = re.match(r"^cover/([A-Za-z0-9_-]+)$", route)
+        if cover_match:
+            stored = self.context.covers.get(cover_match.group(1))
+            if stored is None:
+                self._error(404, "no cover")
+                return
+            self._json({"cover": stored})
             return
         if route == "albums":
             self._json({"albums": library.albums()})
