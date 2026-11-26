@@ -6,6 +6,7 @@ import base64
 import io
 import json
 import mimetypes
+import os
 import re
 import secrets
 import subprocess
@@ -302,6 +303,35 @@ class Handler(BaseHTTPRequestHandler):
             from .dialogs import pick_files
 
             self._json({"paths": pick_files()})
+            return
+
+        if path == "/api/mkdir":
+            payload = self._read_json()
+            target = Path(str(payload.get("path", "")).strip())
+            if not target.name or target.name in (".", ".."):
+                self._error(400, "name required")
+                return
+            parent = target.parent
+            if not parent.is_dir():
+                self._error(404, "parent folder not found")
+                return
+            roots = [
+                os.path.normpath(folder["path"]).lower() for folder in self.context.library.folders()
+            ]
+            parent_key = os.path.normpath(str(parent)).lower()
+            inside = any(parent_key == root or parent_key.startswith(root + "\\") for root in roots)
+            if not inside:
+                self._error(403, "outside the library")
+                return
+            try:
+                target.mkdir()
+            except FileExistsError:
+                self._error(409, "folder exists")
+                return
+            except OSError as exc:
+                self._error(500, str(exc))
+                return
+            self._json({"path": str(target)})
             return
 
         if path == "/api/add-path":

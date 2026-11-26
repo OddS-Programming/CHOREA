@@ -279,6 +279,7 @@ button { font: inherit; color: inherit; }
 .icon-btn:hover { color: var(--text); background: var(--surface-3); }
 .icon-btn.on { color: var(--accent); }
 .icon-btn:active { transform: scale(0.92); }
+.icon-btn:disabled { opacity: 0.3; cursor: default; background: transparent; color: var(--dim); }
 
 .icon-btn svg { width: 18px; height: 18px; fill: currentColor; display: block; pointer-events: none; }
 .play-btn svg { width: 20px; height: 20px; fill: currentColor; display: block; pointer-events: none; }
@@ -356,8 +357,8 @@ button { font: inherit; color: inherit; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 28px;
-  padding: 32px 24px;
+  gap: 48px;
+  padding: 24px;
   width: min(1100px, 94vw);
   max-height: 100%;
   overflow: hidden;
@@ -365,7 +366,7 @@ button { font: inherit; color: inherit; }
 
 .np-left {
   flex: 0 0 auto;
-  width: min(420px, 42vw);
+  width: min(340px, 38vw, 42vh);
   display: grid;
   justify-items: center;
   gap: 14px;
@@ -378,11 +379,11 @@ button { font: inherit; color: inherit; }
   width: 0;
   opacity: 0;
   overflow: hidden;
-  height: min(66vh, 560px);
+  height: min(62vh, 540px);
   transition: width 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 200ms ease;
 }
 
-.np-body.with-lyrics .np-right { width: min(520px, 50vw); opacity: 1; }
+.np-body.with-lyrics .np-right { width: min(460px, 44vw); opacity: 1; }
 .np-body.with-lyrics .np-lyrics { height: 100%; max-height: none; text-align: left; font-size: 15px; line-height: 1.65; padding: 0 8px 0 0; }
 
 .lyric-line { cursor: pointer; }
@@ -390,15 +391,16 @@ button { font: inherit; color: inherit; }
 
 @media (max-width: 900px) {
   .np-body { flex-direction: column; gap: 14px; padding: 18px; }
-  .np-left { width: min(420px, 86vw); }
+  .np-left { width: min(340px, 70vw, 34vh); }
   .np-right { width: 0; height: 0; opacity: 0; }
-  .np-body.with-lyrics .np-right { width: min(520px, 86vw); height: 30vh; opacity: 1; }
+  .np-body.with-lyrics .np-right { width: min(460px, 86vw); height: 30vh; opacity: 1; }
   .np-body.with-lyrics .np-lyrics { padding: 12% 8px 16% 0; }
 }
 
 .np-cover {
-  width: min(38vh, 340px);
-  height: min(38vh, 340px);
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
   border-radius: 18px;
   overflow: hidden;
   box-shadow: 0 40px 80px rgba(0, 0, 0, 0.55);

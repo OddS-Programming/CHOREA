@@ -304,6 +304,24 @@ def test_add_path_handles_file_and_folder(server, tmp_path) -> None:
     assert status == 404
 
 
+def test_mkdir_creates_folder_inside_library(server, tmp_path) -> None:
+    running, library, _track = server
+    root = tmp_path / "Album"
+    root.mkdir(exist_ok=True)
+    library.add_folder(root)
+    target = root / "Sub"
+
+    status, payload = _post(running, "/api/mkdir", {"path": str(target)})
+    assert status == 200
+    assert target.is_dir()
+    assert payload["path"] == str(target)
+
+    assert _post(running, "/api/mkdir", {"path": str(target)})[0] == 409
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    assert _post(running, "/api/mkdir", {"path": str(outside / "x")})[0] == 403
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

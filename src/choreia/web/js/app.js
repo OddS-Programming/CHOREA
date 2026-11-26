@@ -19,6 +19,7 @@ const state = {
   lyricLines: [],
   lyricIndex: -1,
   followPauseUntil: 0,
+  lyricsVisible: localStorage.getItem("choreia.lyricsVisible") !== "0",
   askResolve: null,
   askMode: "text",
   collection: null,
@@ -486,15 +487,16 @@ async function renderFolders() {
   } catch (error) {
     state.folders = [];
   }
+  const toolbar = '<div class="playlist-toolbar"><button class="ghost" id="folder-new">＋ Новая папка</button></div>';
   if (!state.folders.length) {
-    el.view.innerHTML = `
+    el.view.innerHTML = `${toolbar}
       <div class="empty"><div>
         <h2>Папок пока нет</h2>
-        <p>Нажмите «Добавить папку» слева. χορεία обходит вложенные папки исполнителей и альбомов.</p>
+        <p>Добавьте папку с музыкой или создайте новую.</p>
       </div></div>`;
     return;
   }
-  el.view.innerHTML = `<div class="scroll">${state.folders.map((folder) => `
+  el.view.innerHTML = `${toolbar}<div class="scroll">${state.folders.map((folder) => `
     <div class="row" data-folder="${escapeHtml(folder.path)}">
       <div class="row-cover">▤</div>
       <div class="row-main">
@@ -690,7 +692,7 @@ function renderCollection() {
   counts.push(`${collection.tracks.length} треков`);
   const parts = [`<div class="playlist-toolbar">
     ${collection.parent ? '<button class="ghost" id="collection-back">← Назад</button>' : ""}
-    ${collection.kind === "folder" ? '<button class="ghost" id="folder-add-tracks">＋ Добавить треки</button><button class="ghost" id="folder-add-folder">＋ Добавить папку</button>' : ""}
+    ${collection.kind === "folder" ? '<button class="ghost" id="folder-new">＋ Новая папка</button><button class="ghost" id="folder-add-tracks">＋ Добавить треки</button><button class="ghost" id="folder-add-folder">＋ Добавить папку</button>' : ""}
     <span class="hint">${counts.join(" · ")}</span>
   </div>`, '<div class="scroll">'];
   for (const folder of collection.folders || []) parts.push(folderRow(folder));
@@ -793,6 +795,24 @@ function updateSelection() {
   document.querySelectorAll(".row[data-id]").forEach((row) => {
     row.classList.toggle("selected", state.selection.has(Number(row.dataset.id)));
   });
+}
+
+async function createFolder() {
+  const base = state.collection?.path || (state.folders[0]?.path || "C:\\");
+  const suggested = base.replace(/[\\/]+$/, "") + "\\Новая папка";
+  const path = await askText("Новая папка", suggested, "Полный путь к новой папке");
+  if (!path) return;
+  try {
+    await API.post("mkdir", { path });
+    toast("Папка создана");
+    if (state.view === "folder" && state.collection?.path) {
+      await openFolder(state.collection.path, false);
+    } else {
+      await renderFolders();
+    }
+  } catch (error) {
+    toast("Не удалось создать папку: проверьте путь");
+  }
 }
 
 function renderPlaceholder(title, text) {
@@ -1037,12 +1057,30 @@ async function loadLyrics(trackId) {
   renderLyrics();
 }
 
-function renderLyrics() {
-  const box = el.npLyrics;
-  const hasText = Boolean(
+function lyricsHaveText() {
+  return Boolean(
     state.lyrics && ((state.lyrics.synced || "").trim() || (state.lyrics.plain || "").trim())
   );
-  el.npBody.classList.toggle("with-lyrics", hasText);
+}
+
+function applyLyricsVisibility() {
+  const hasText = lyricsHaveText();
+  const shown = hasText && state.lyricsVisible;
+  el.npBody.classList.toggle("with-lyrics", shown);
+  el.npLyricsToggle.disabled = !hasText;
+  el.npLyricsToggle.classList.toggle("on", shown);
+  setIcon(el.npLyricsToggle, state.lyricsVisible ? "eye" : "eye-off");
+}
+
+function toggleLyrics() {
+  state.lyricsVisible = !state.lyricsVisible;
+  localStorage.setItem("choreia.lyricsVisible", state.lyricsVisible ? "1" : "0");
+  applyLyricsVisibility();
+}
+
+function renderLyrics() {
+  const box = el.npLyrics;
+  applyLyricsVisibility();
   if (!state.lyrics) {
     box.innerHTML = '<div class="lyrics-empty">Текста нет — нажмите кнопку текста внизу.</div>';
     return;
@@ -1175,6 +1213,10 @@ el.view.addEventListener("click", async (event) => {
   }
   if (event.target.id === "collection-back") {
     await folderBack();
+    return;
+  }
+  if (event.target.id === "folder-new") {
+    await createFolder();
     return;
   }
   if (event.target.id === "folder-add-folder") {
@@ -1380,6 +1422,9 @@ el.selectionClear.addEventListener("click", () => {
   updateSelection();
 });
 
+el.npLyricsToggle.addEventListener("click", toggleLyrics);
+applyLyricsVisibility();
+
 el.npLyricsEdit.addEventListener("click", openLyricsEditor);
 el.lyricsForm.addEventListener("submit", saveLyrics);
 el.lyricsClose.addEventListener("click", closeLyricsEditor);
@@ -1409,7 +1454,8 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "ArrowLeft") { event.preventDefault(); el.audio.currentTime -= 5; }
   if (event.code === "KeyN") nextTrack(1);
   if (event.code === "KeyP") nextTrack(-1);
-  if (event.code === "KeyM") { el.audio.muted = !el.audio.muted; el.mute.textContent = el.audio.muted ? "▯" : "▮"; }
+  if (event.code === "KeyM") { el.audio.muted = !el.audio.muted; setIcon(el.mute, el.audio.muted ? "mute" : "volume"); setIcon(el.npMute, el.audio.muted ? "mute" : "volume"); }
+  if (event.code === "KeyL") toggleLyrics();
   if (event.code === "Escape") {
     if (!el.askModal.hidden) closeAsk(state.askMode === "text" ? null : false);
     else if (!el.lyricsModal.hidden) closeLyricsEditor();
