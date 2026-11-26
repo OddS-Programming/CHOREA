@@ -8,6 +8,7 @@ window uses the same engine without that layer.
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import subprocess
 import sys
@@ -79,12 +80,21 @@ def open_app_window(url: str, profile: Path, width: int = 1280, height: int = 84
         stderr=subprocess.DEVNULL,
     )
 
-    deadline = time.time() + 20
-    while time.time() < deadline and not find_window():
-        if process.poll() is not None and not find_window():
-            time.sleep(0.3)
-            break
+    deadline = time.time() + 60
+    window = find_window()
+    while not window and time.time() < deadline:
         time.sleep(0.25)
+        window = find_window()
 
-    while find_window():
+    if not window:
+        # Edge can hand the window to an already running browser process: the
+        # launcher exits at once while the window shows up seconds later. Never
+        # stop the server in that moment, or the window loads a dead page.
+        logging.warning("app window not detected within 60s, keeping the server alive")
+
+    while True:
+        if window and not find_window():
+            break
+        if not window:
+            window = find_window()
         time.sleep(1.0)
