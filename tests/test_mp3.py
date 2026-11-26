@@ -169,6 +169,12 @@ def test_read_only_file_is_refused_without_leftovers(tmp_path: Path, asset) -> N
     assert not list(tmp_path.glob("*.coverfix-tmp"))
 
 
+def test_small_cover_is_flagged(tmp_path: Path, asset) -> None:
+    path, _ = _mp3_with_pictures(tmp_path, asset)
+    report = inspect_file(path)
+    assert any("площадки могут заменить" in warning for warning in report.warnings)
+
+
 def test_backup_created_and_original_restored_on_error(tmp_path: Path, asset) -> None:
     path, _ = _mp3_with_pictures(tmp_path, asset)
     original = path.read_bytes()

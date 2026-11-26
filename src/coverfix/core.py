@@ -65,6 +65,15 @@ def inspect_file(path: Path | str) -> FileReport:
 
     if container.note:
         report.warnings.insert(0, container.note)
+    cover = report.front_cover
+    if cover is not None and cover.width and cover.height:
+        if min(cover.width, cover.height) < 500:
+            report.warnings.append(
+                f"обложка {cover.resolution} — площадки могут заменить её своей, "
+                "лучше от 1000x1000 и больше"
+            )
+        elif cover.width != cover.height:
+            report.warnings.append(f"обложка не квадратная ({cover.resolution}) — площадки обрезают такие")
     report.warnings.extend(_sidecar_warnings(path))
     return report
 

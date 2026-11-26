@@ -65,6 +65,30 @@ def test_open_folder_lists_every_track(window: App, tmp_path: Path, asset) -> No
     assert len(window.track_list.reports) == 2
 
 
+def test_multi_selection_applies_only_changed_fields(window: App, tmp_path: Path, asset) -> None:
+    from coverfix.core import inspect_file
+
+    folder = tmp_path / "album"
+    folder.mkdir()
+    first = helpers.copy_asset("mp3", folder / "01.mp3")
+    second = helpers.copy_asset("mp3", folder / "02.mp3")
+    helpers.add_mp3_pictures(first)
+    helpers.add_mp3_pictures(second)
+    window.load_folder(folder)
+
+    window.track_list.select_paths({first.resolve(), second.resolve()})
+    assert len(window.selection) == 2
+    assert window.vars["title"].get() == "Original title"
+
+    window.vars["artist"].set("Общий исполнитель")
+    window.apply_current()
+
+    reports = [inspect_file(first), inspect_file(second)]
+    assert [report.fields["artist"] for report in reports] == ["Общий исполнитель"] * 2
+    assert [report.fields["title"] for report in reports] == ["Original title"] * 2
+    assert [len(report.pictures) for report in reports] == [1, 1]
+
+
 def test_search_filters_the_list(window: App, tmp_path: Path, asset) -> None:
     folder = tmp_path / "album"
     folder.mkdir()

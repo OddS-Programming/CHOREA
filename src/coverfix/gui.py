@@ -130,13 +130,14 @@ class TrackList(tk.Canvas):
     """Canvas-drawn list: one row per track with cover, title, artist, length."""
 
     def __init__(self, master: tk.Misc, on_select) -> None:  # noqa: ANN001
-        super().__init__(master, bg=BG, highlightthickness=0, bd=0)
+        super().__init__(master, bg=BG, highlightthickness=0, bd=0, takefocus=True)
         self.on_select = on_select
         self.reports: list[FileReport] = []
         self._photos: list[ImageTk.PhotoImage] = []
         self._rows: list[dict] = []
         self._hover = -1
-        self._selected = -1
+        self._selection: set[int] = set()
+        self._anchor = -1
         self._placeholder = ImageTk.PhotoImage(_cover_image(None, THUMB_SIZE, 8, BG))
 
         self.bind("<Configure>", lambda _event: self._layout())
@@ -144,20 +145,42 @@ class TrackList(tk.Canvas):
         self.bind("<Leave>", lambda _event: self._set_hover(-1))
         self.bind("<Button-1>", self._on_click)
         self.bind("<MouseWheel>", self._on_wheel)
+        self.bind("<Control-a>", self._select_all)
+        self.bind("<Control-A>", self._select_all)
 
     # ------------------------------------------------------------------ data
     def set_reports(self, reports: list[FileReport]) -> None:
         self.reports = reports
-        self._selected = 0 if reports else -1
+        self._selection = {0} if reports else set()
+        self._anchor = 0 if reports else -1
         self._hover = -1
         self._build()
 
     def select(self, index: int) -> None:
         if not 0 <= index < len(self.reports):
             return
-        self._selected = index
+        self._selection = {index}
+        self._anchor = index
         self._refresh_states()
-        self.on_select(self.reports[index])
+        self.on_select([self.reports[index]])
+
+    def select_paths(self, paths: set[Path], notify: bool = True) -> None:
+        self._selection = {index for index, report in enumerate(self.reports) if report.path in paths}
+        self._anchor = min(self._selection) if self._selection else -1
+        self._refresh_states()
+        if notify and self._selection:
+            self.on_select([self.reports[index] for index in sorted(self._selection)])
+
+    def selected_reports(self) -> list[FileReport]:
+        return [self.reports[index] for index in sorted(self._selection)]
+
+    def _select_all(self, _event=None) -> str:  # noqa: ANN001
+        if self.reports:
+            self._selection = set(range(len(self.reports)))
+            self._anchor = 0
+            self._refresh_states()
+            self.on_select(self.selected_reports())
+        return "break"
 
     # --------------------------------------------------------------- drawing
     def _build(self) -> None:
@@ -263,8 +286,11 @@ class TrackList(tk.Canvas):
 
     def _refresh_states(self) -> None:
         for index, row in enumerate(self._rows):
-            self.itemconfigure(row["hover"], state="normal" if index == self._hover and index != self._selected else "hidden")
-            self.itemconfigure(row["selected"], state="normal" if index == self._selected else "hidden")
+            selected = index in self._selection
+            self.itemconfigure(
+                row["hover"], state="normal" if index == self._hover and not selected else "hidden"
+            )
+            self.itemconfigure(row["selected"], state="normal" if selected else "hidden")
             self.tag_raise(row["hover"])
             self.tag_raise(row["selected"])
             for key in ("image", "title", "artist", "length", "badge"):
@@ -290,8 +316,29 @@ class TrackList(tk.Canvas):
 
     def _on_click(self, event: tk.Event) -> None:  # noqa: ANN001
         index = self._index_at(int(self.canvasy(event.y)))
-        if index >= 0:
-            self.select(index)
+        if index < 0:
+            return
+        self.focus_set()
+        control = bool(event.state & 0x0004)
+        shift = bool(event.state & 0x0001)
+
+        if shift and self._anchor >= 0:
+            low, high = sorted((self._anchor, index))
+            self._selection = set(range(low, high + 1))
+        elif control:
+            if index in self._selection:
+                self._selection.discard(index)
+            else:
+                self._selection.add(index)
+            self._anchor = index
+            if not self._selection:
+                self._selection = {index}
+        else:
+            self._selection = {index}
+            self._anchor = index
+
+        self._refresh_states()
+        self.on_select(self.selected_reports())
 
     def _on_wheel(self, event: tk.Event) -> None:  # noqa: ANN001
         self.yview_scroll(int(-event.delta / 120), "units")
@@ -304,6 +351,8 @@ class App:
         self.reports: dict[Path, FileReport] = {}
         self.order: list[Path] = []
         self.current: FileReport | None = None
+        self.selection: list[FileReport] = []
+        self._baseline: dict[str, str | None] = {}
         self.chosen: Picture | None = None
         self._detail_photo: ImageTk.PhotoImage | None = None
         self._cover_photos: list[ImageTk.PhotoImage] = []
@@ -404,7 +453,8 @@ class App:
 
         actions = tk.Frame(panel, bg=SURFACE)
         actions.pack(side="bottom", fill="x", padx=16, pady=(10, 12))
-        self._button(actions, "Записать", self.apply_current, accent=True).pack(side="left")
+        self.write_button = self._button(actions, "Записать", self.apply_current, accent=True)
+        self.write_button.pack(side="left")
         self._button(actions, "Записать все", self.apply_all).pack(side="left", padx=(6, 0))
         self.backup_var = tk.BooleanVar(value=True)
         tk.Checkbutton(
@@ -490,6 +540,18 @@ class App:
             wraplength=330,
         )
         self._warning_packed = False
+
+        self.multi_hint = tk.Label(
+            inner,
+            text="",
+            bg=SURFACE,
+            fg=DIM,
+            font=FONT_SMALL,
+            anchor="w",
+            justify="left",
+            wraplength=330,
+        )
+        self._hint_packed = False
 
         self._bind_wheel(inner)
 
@@ -603,30 +665,83 @@ class App:
     def _on_drop(self, event) -> None:  # noqa: ANN001 - tkinter event
         self.add_paths([Path(item) for item in self.root.tk.splitlist(event.data)])
 
-    def _on_track_selected(self, report: FileReport) -> None:
-        self.current = report
-        self.chosen = report.front_cover
+    def _on_track_selected(self, reports: list[FileReport]) -> None:
+        if not reports:
+            return
+        self.selection = reports
+        self.current = reports[0]
+        single = len(reports) == 1
+
+        self.chosen = next((report.front_cover for report in reports if report.front_cover), None)
+        self._baseline = {}
+        mixed = 0
         for name, variable in self.vars.items():
-            variable.set(report.fields.get(name, ""))
+            values = {report.fields.get(name, "").strip() for report in reports}
+            if len(values) == 1:
+                value = next(iter(values))
+                self._baseline[name] = value
+                variable.set(value)
+            else:
+                mixed += 1
+                self._baseline[name] = None
+                variable.set("")
 
-        title = report.fields.get("title") or report.path.stem
-        artist = report.fields.get("artist") or "—"
-        self.detail_title.configure(text=_ellipsize(title, 34))
-        self.detail_sub.configure(
-            text=f"{_ellipsize(artist, 30)} · {report.container.upper()} · {_duration(report.audio.get('duration'))}"
+        if single:
+            report = reports[0]
+            title = report.fields.get("title") or report.path.stem
+            artist = report.fields.get("artist") or "—"
+            self.detail_title.configure(text=_ellipsize(title, 34))
+            self.detail_sub.configure(
+                text=f"{_ellipsize(artist, 30)} · {report.container.upper()} · {_duration(report.audio.get('duration'))}"
+            )
+            self._show_cover(self.chosen)
+            self._show_cover_choices(report)
+            warnings = report.warnings
+            self.status.set(str(report.path))
+        else:
+            distinct_covers = len({picture.data for picture in (r.front_cover for r in reports) if picture})
+            self.detail_title.configure(text=f"Выбрано треков: {len(reports)}")
+            subtitle = "изменённые поля применятся ко всем"
+            if distinct_covers > 1:
+                subtitle += " · обложки различаются"
+            self.detail_sub.configure(text=subtitle)
+            self._show_cover(self.chosen)
+            for child in self.covers_row.winfo_children():
+                child.destroy()
+            tk.Label(
+                self.covers_row,
+                text=f"Обложка будет вложена во все {len(reports)}",
+                bg=SURFACE,
+                fg=DIM,
+                font=FONT_SMALL,
+                anchor="w",
+            ).pack(fill="x")
+            warnings = []
+            self.status.set(f"Выбрано треков: {len(reports)}")
+
+        self.write_button.configure(text=f"Записать ({len(reports)})" if not single else "Записать")
+
+        self.multi_hint.configure(
+            text="Пустое поле означает разные значения. Заполните только то, что нужно "
+            "проставить всем — остальное не изменится."
+            if not single and mixed
+            else ""
         )
+        if not single and mixed and not self._hint_packed:
+            self.multi_hint.pack(fill="x", padx=16, pady=(6, 0), before=self.warning_label)
+            self._hint_packed = True
+        elif (single or not mixed) and self._hint_packed:
+            self.multi_hint.pack_forget()
+            self._hint_packed = False
 
-        self._show_cover(self.chosen)
-        self._show_cover_choices(report)
         self.warning_label.configure(text="")
         if self._warning_packed:
             self.warning_label.pack_forget()
             self._warning_packed = False
-        self.warning_label.configure(text="\n".join(report.warnings[:2]))
-        if report.warnings:
+        self.warning_label.configure(text="\n".join(warnings[:2]))
+        if warnings:
             self.warning_label.pack(fill="x", padx=16, pady=(8, 14))
             self._warning_packed = True
-        self.status.set(str(report.path))
 
     def _show_cover(self, picture: Picture | None) -> None:
         image = _cover_image(picture.data if picture else None, DETAIL_COVER, 14, SURFACE)
@@ -651,7 +766,7 @@ class App:
     def _pick_cover(self, picture: Picture) -> None:
         self.chosen = picture
         self._show_cover(picture)
-        if self.current is not None:
+        if len(self.selection) == 1 and self.current is not None:
             for child in self.covers_row.winfo_children():
                 child.destroy()
             self._show_cover_choices(self.current)
@@ -679,10 +794,24 @@ class App:
         self.status.set("Файл будет записан без обложки")
 
     def apply_current(self) -> None:
-        if self.current is None:
-            messagebox.showinfo("CoverFix", "Выберите трек в списке.")
+        paths = [report.path for report in self.selection]
+        if not paths:
+            messagebox.showinfo("CoverFix", "Выберите треки в списке.")
             return
-        self._apply([self.current.path])
+        self._apply(paths)
+
+    def _changes(self) -> dict[str, str]:
+        """Fields the user actually changed; everything else keeps each file's value."""
+        changes: dict[str, str] = {}
+        for name, variable in self.vars.items():
+            value = variable.get().strip()
+            baseline = self._baseline.get(name)
+            if baseline is None:
+                if value:
+                    changes[name] = value
+            elif value != baseline:
+                changes[name] = value
+        return changes
 
     def apply_all(self) -> None:
         if not self.order:
@@ -697,10 +826,14 @@ class App:
         self._apply(list(self.order))
 
     def _apply(self, paths: list[Path]) -> None:
-        metadata = {name: variable.get().strip() for name, variable in self.vars.items()}
+        changes = self._changes()
         cover = self.chosen
+        selected_paths = [report.path for report in self.selection]
         ok = 0
         for path in paths:
+            report = self.reports.get(path)
+            metadata = dict(report.fields) if report is not None else {}
+            metadata.update(changes)
             try:
                 after = clean_file(path, keep=cover, metadata=metadata, backup=self.backup_var.get())
             except Exception as exc:
@@ -732,9 +865,28 @@ def create_root():
         return tk.Tk(), False
 
 
+def _icon_file() -> Path | None:
+    roots = []
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        roots.append(Path(bundle))
+    roots.append(Path(__file__).resolve().parents[2])
+    for root in roots:
+        candidate = root / "assets" / "app.ico"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def main() -> int:
     _enable_dpi_awareness()
     root, dnd = create_root()
+    icon = _icon_file()
+    if icon is not None:
+        try:
+            root.iconbitmap(default=str(icon))
+        except Exception:
+            pass
     app = App(root, dnd)
     for argument in sys.argv[1:]:
         candidate = Path(argument)
