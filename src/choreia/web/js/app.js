@@ -111,6 +111,7 @@ const el = {
   selectionEdit: document.getElementById("selection-edit"),
   selectionPlay: document.getElementById("selection-play"),
   selectionClear: document.getElementById("selection-clear"),
+  uploadFiles: document.getElementById("upload-files"),
   spectrum: document.getElementById("spectrum"),
   toast: document.getElementById("toast"),
   addFolder: document.getElementById("add-folder"),
@@ -489,7 +490,7 @@ async function renderFolders() {
   } catch (error) {
     state.folders = [];
   }
-  const toolbar = '<div class="playlist-toolbar"><button class="ghost" id="folder-new">＋ Новая папка</button></div>';
+  const toolbar = '<div class="playlist-toolbar"></div>';
   if (!state.folders.length) {
     el.view.innerHTML = `${toolbar}
       <div class="empty"><div>
@@ -694,7 +695,7 @@ function renderCollection() {
   counts.push(`${collection.tracks.length} треков`);
   const parts = [`<div class="playlist-toolbar">
     ${collection.parent ? '<button class="ghost" id="collection-back">← Назад</button>' : ""}
-    ${collection.kind === "folder" ? '<button class="ghost" id="folder-new">＋ Новая папка</button><button class="ghost" id="folder-add-tracks">＋ Добавить треки</button><button class="ghost" id="folder-add-folder">＋ Добавить папку</button>' : ""}
+    ${collection.kind === "folder" ? '<button class="ghost" id="folder-new">＋ Новая папка</button><button class="ghost" id="folder-upload">＋ Добавить трек</button>' : ""}
     <span class="hint">${counts.join(" · ")}</span>
   </div>`, '<div class="scroll">'];
   for (const folder of collection.folders || []) parts.push(folderRow(folder));
@@ -800,21 +801,61 @@ function updateSelection() {
 }
 
 async function createFolder() {
-  const base = state.collection?.path || (state.folders[0]?.path || "C:\\");
-  const suggested = base.replace(/[\\/]+$/, "") + "\\Новая папка";
-  const path = await askText("Новая папка", suggested, "Полный путь к новой папке");
-  if (!path) return;
-  try {
-    await API.post("mkdir", { path });
-    toast("Папка создана");
-    if (state.view === "folder" && state.collection?.path) {
-      await openFolder(state.collection.path, false);
-    } else {
-      await renderFolders();
-    }
-  } catch (error) {
-    toast("Не удалось создать папку: проверьте путь");
+  if (state.view !== "folder" || !state.collection?.path) {
+    toast("Сначала откройте папку");
+    return;
   }
+  const name = await askText("Новая папка", "Новая папка", "Название папки");
+  if (!name) return;
+  if (/[\\/]/.test(name)) {
+    toast("В названии не может быть слэшей");
+    return;
+  }
+  const base = state.collection.path.replace(/[\\/]+$/, "");
+  try {
+    await API.post("mkdir", { path: `${base}\\${name}` });
+    toast(`Папка «${name}» создана`);
+    await openFolder(state.collection.path, false);
+  } catch (error) {
+    toast("Не удалось создать папку: возможно, такое имя уже есть");
+  }
+}
+
+async function uploadTracks() {
+  if (state.view !== "folder" || !state.collection?.path) {
+    toast("Сначала откройте папку");
+    return;
+  }
+  el.uploadFiles.click();
+}
+
+async function handleUpload(files) {
+  if (!files.length || !state.collection?.path) return;
+  let added = 0;
+  let failed = 0;
+  for (const file of files) {
+    try {
+      const response = await fetch(
+        `/api/upload?path=${encodeURIComponent(state.collection.path)}&t=${encodeURIComponent(TOKEN)}`,
+        {
+          method: "POST",
+          headers: {
+            "X-Token": TOKEN,
+            "X-Filename": encodeURIComponent(file.name),
+            "Content-Type": "application/octet-stream",
+          },
+          body: file,
+        }
+      );
+      if (response.ok) added += 1;
+      else failed += 1;
+    } catch (error) {
+      failed += 1;
+    }
+  }
+  toast(failed ? `Загружено: ${added}, ошибок: ${failed}` : `Загружено треков: ${added}`);
+  await openFolder(state.collection.path, false);
+  await loadTracks();
 }
 
 function renderPlaceholder(title, text) {
@@ -1270,12 +1311,8 @@ el.view.addEventListener("click", async (event) => {
     await createFolder();
     return;
   }
-  if (event.target.id === "folder-add-folder") {
-    await addFolder();
-    return;
-  }
-  if (event.target.id === "folder-add-tracks") {
-    await addTracksFromPath();
+  if (event.target.id === "folder-upload") {
+    await uploadTracks();
     return;
   }
   const subfolder = event.target.closest("[data-subfolder]");
@@ -1474,6 +1511,11 @@ el.selectionClear.addEventListener("click", () => {
 });
 
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
+el.uploadFiles.addEventListener("change", async () => {
+  const files = [...el.uploadFiles.files];
+  el.uploadFiles.value = "";
+  if (files.length) await handleUpload(files);
+});
 applyLyricsVisibility();
 
 el.npLyricsEdit.addEventListener("click", openLyricsEditor);

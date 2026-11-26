@@ -322,6 +322,39 @@ def test_mkdir_creates_folder_inside_library(server, tmp_path) -> None:
     assert _post(running, "/api/mkdir", {"path": str(outside / "x")})[0] == 403
 
 
+def test_upload_writes_file_into_folder(server, tmp_path) -> None:
+    import urllib.parse
+
+    import helpers
+
+    running, library, _track = server
+    folder = tmp_path / "Uploads"
+    folder.mkdir()
+    library.add_folder(folder)
+    data = (helpers.ASSETS / "tone.mp3").read_bytes()
+
+    def upload(name: str) -> None:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{running.port}/api/upload?path={urllib.parse.quote(str(folder))}",
+            data=data,
+            method="POST",
+            headers={
+                "X-Token": running.context.token,
+                "X-Filename": urllib.parse.quote(name),
+                "Content-Type": "application/octet-stream",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            assert response.status == 200
+
+    upload("new track.mp3")
+    assert (folder / "new track.mp3").exists()
+    assert library.track_by_path(str(folder / "new track.mp3")) is not None
+
+    upload("new track.mp3")
+    assert (folder / "new track (2).mp3").exists()
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

@@ -334,6 +334,66 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"path": str(target)})
             return
 
+        if path == "/api/upload":
+            from ..library.scanner import AUDIO_SUFFIXES
+
+            directory = Path((self._query().get("path") or [""])[0])
+            if not directory.is_dir():
+                self._error(404, "folder not found")
+                return
+            roots = [
+                os.path.normpath(folder["path"]).lower() for folder in self.context.library.folders()
+            ]
+            key = os.path.normpath(str(directory)).lower()
+            if not any(key == root or key.startswith(root + "\\") for root in roots):
+                self._error(403, "outside the library")
+                return
+
+            raw_name = unquote(self.headers.get("X-Filename", "") or "")
+            safe_name = Path(raw_name).name
+            suffix = Path(safe_name).suffix.lower()
+            if not safe_name or suffix not in AUDIO_SUFFIXES:
+                self._error(400, "unsupported audio file")
+                return
+
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0 or length > 300_000_000:
+                self._error(400, "bad size")
+                return
+
+            target = directory / safe_name
+            counter = 1
+            while target.exists():
+                counter += 1
+                target = directory / f"{Path(safe_name).stem} ({counter}){suffix}"
+
+            written = 0
+            try:
+                with target.open("wb") as handle:
+                    while written < length:
+                        chunk = self.rfile.read(min(262144, length - written))
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        written += len(chunk)
+            except OSError as exc:
+                target.unlink(missing_ok=True)
+                self._error(500, str(exc))
+                return
+
+            if written != length:
+                target.unlink(missing_ok=True)
+                self._error(400, "upload interrupted")
+                return
+
+            try:
+                refresh_track(self.context.library, self.context.thumbs, target)
+            except Exception as exc:
+                self._error(500, f"cannot index: {exc}")
+                return
+            self._json({"path": str(target), "name": target.name})
+            return
+
         if path == "/api/add-path":
             from ..library.scanner import AUDIO_SUFFIXES
 
