@@ -1,5 +1,5 @@
 """Entry point used by PyInstaller."""
 
-from coverfix.gui import main
+from choreia.gui import main
 
 raise SystemExit(main())

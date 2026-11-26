@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from mutagen.mp4 import MP4
 
-from coverfix.core import clean_file, inspect_file
+from choreia.core import clean_file, inspect_file
 import helpers
 
 

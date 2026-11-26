@@ -39,7 +39,7 @@ def write_with_backup(
         if not saved.exists():
             shutil.copy2(path, saved)
 
-    temporary = path.with_name(path.name + ".coverfix-tmp")
+    temporary = path.with_name(path.name + ".choreia-tmp")
     shutil.copy2(path, temporary)
     try:
         writer(temporary)

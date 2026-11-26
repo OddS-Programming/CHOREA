@@ -1,4 +1,4 @@
-"""CoverFix — see what is really inside an audio file and keep exactly one cover."""
+"""χορεία — see what is really inside an audio file and keep exactly one cover."""
 
 from __future__ import annotations
 

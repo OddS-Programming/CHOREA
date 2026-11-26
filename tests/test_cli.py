@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from coverfix.core import inspect_file
+from choreia.core import inspect_file
 import helpers
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +15,7 @@ ENV = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "coverfix", *args],
+        [sys.executable, "-m", "choreia", *args],
         capture_output=True,
         text=True,
         env=ENV,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coverfix.raw import scan_mp3_regions
+from choreia.raw import scan_mp3_regions
 from helpers import apev2_footer, copy_asset, id3v1_block, id3v2_block
 import helpers
 

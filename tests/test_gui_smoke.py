@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from coverfix.gui import App
+from choreia.gui import App
 import helpers
 
 
@@ -66,7 +66,7 @@ def test_open_folder_lists_every_track(window: App, tmp_path: Path, asset) -> No
 
 
 def test_multi_selection_applies_only_changed_fields(window: App, tmp_path: Path, asset) -> None:
-    from coverfix.core import inspect_file
+    from choreia.core import inspect_file
 
     folder = tmp_path / "album"
     folder.mkdir()
@@ -80,6 +80,7 @@ def test_multi_selection_applies_only_changed_fields(window: App, tmp_path: Path
     assert len(window.selection) == 2
     assert window.vars["title"].get() == "Original title"
 
+    window._confirm = lambda *args, **kwargs: True
     window.vars["artist"].set("Общий исполнитель")
     window.apply_current()
 

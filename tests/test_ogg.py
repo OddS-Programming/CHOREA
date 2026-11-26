@@ -5,7 +5,7 @@ from pathlib import Path
 
 from mutagen.oggvorbis import OggVorbis
 
-from coverfix.core import clean_file, inspect_file
+from choreia.core import clean_file, inspect_file
 import helpers
 
 

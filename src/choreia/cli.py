@@ -60,10 +60,10 @@ def _load_cover(path: Path) -> Picture:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="coverfix",
+        prog="choreia",
         description="Показывает все теги и все обложки в аудиофайле и пересобирает его с одной обложкой.",
     )
-    parser.add_argument("--version", action="version", version="coverfix 1.0.0")
+    parser.add_argument("--version", action="version", version="choreia 1.0.0")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     inspect = subparsers.add_parser("inspect", help="показать всё, что лежит в файле")

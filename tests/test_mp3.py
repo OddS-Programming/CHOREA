@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from mutagen.id3 import ID3
 
-from coverfix.atomic import write_with_backup
-from coverfix.core import clean_file, inspect_file
-from coverfix.raw import scan_mp3_regions
+from choreia.atomic import write_with_backup
+from choreia.core import clean_file, inspect_file
+from choreia.raw import scan_mp3_regions
 import helpers
 
 
@@ -166,7 +166,7 @@ def test_read_only_file_is_refused_without_leftovers(tmp_path: Path, asset) -> N
         os.chmod(path, stat.S_IWRITE)
 
     assert path.read_bytes() == original
-    assert not list(tmp_path.glob("*.coverfix-tmp"))
+    assert not list(tmp_path.glob("*.choreia-tmp"))
 
 
 def test_small_cover_is_flagged(tmp_path: Path, asset) -> None:

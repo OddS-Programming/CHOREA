@@ -1,4 +1,4 @@
-# CoverFix
+# χορεία
 
 Показывает, что на самом деле лежит в аудиофайле (все версии тегов и все вложенные обложки), и пересобирает файл так, чтобы остались один чистый набор тегов и ровно одна обложка.
 
@@ -12,16 +12,16 @@ mp3tag показывает одну обложку из одного тега. 
 - обложка во FLAC — в Vorbis-комментарии `metadata_block_picture`;
 - несколько картинок в атоме `covr` у m4a.
 
-Плеер или площадка берут не ту, которую вы видите в редакторе. CoverFix показывает всё это списком и удаляет лишнее.
+Плеер или площадка берут не ту, которую вы видите в редакторе. χορεία показывает всё это списком и удаляет лишнее.
 
 ## Запуск
 
 ```bash
-python -m coverfix inspect "track.mp3"
-python -m coverfix inspect --json "track.mp3"
-python -m coverfix clean "track.mp3" --keep 2 --title "Название" --artist "Исполнитель"
-python -m coverfix clean "track.mp3" --cover cover.jpg --no-backup
-python -m coverfix clean "track.mp3" --no-cover
+python -m choreia inspect "track.mp3"
+python -m choreia inspect --json "track.mp3"
+python -m choreia clean "track.mp3" --keep 2 --title "Название" --artist "Исполнитель"
+python -m choreia clean "track.mp3" --cover cover.jpg --no-backup
+python -m choreia clean "track.mp3" --no-cover
 ```
 
 **Список треков.**
@@ -40,16 +40,16 @@ python -m coverfix clean "track.mp3" --no-cover
 powershell -ExecutionPolicy Bypass -File tools\install.ps1
 ```
 
-Копирует `CoverFix.exe` в `%LOCALAPPDATA%\Programs\CoverFix`, создаёт ярлык на рабочем столе и в меню «Пуск»; после этого приложение находится через `Win+S` по слову `CoverFix`.
+Копирует `Choreia.exe` в `%LOCALAPPDATA%\Programs\Choreia`, создаёт ярлык на рабочем столе и в меню «Пуск»; после этого приложение находится через `Win+S` по слову `χορεία`.
 
-Окно: `python -m coverfix.gui` или `CoverFix.exe`.
+Окно: `python -m choreia.gui` или `Choreia.exe`.
 
 - «Открыть папку» (Ctrl+O) — рекурсивно находит mp3/flac/m4a/ogg/opus и показывает каждый трек строкой: обложка, название, исполнитель, длительность.
 - Двойной клик по строке не нужен: выбор одним кликом, справа все обложки файла и поля метаданных.
 - Перетаскивание файлов или папки в окно работает так же.
-- `CoverFix.exe "C:\Music\Album"` открывает папку сразу при запуске.
+- `Choreia.exe "C:\Music\Album"` открывает папку сразу при запуске.
 
-Демо-альбом для проверки: `python tools/make_demo.py` (создаёт `../coverfix-demo` с шестью треками и одним «грязным» файлом на три обложки).
+Демо-альбом для проверки: `python tools/make_demo.py` (создаёт `../choreia-demo` с шестью треками и одним «грязным» файлом на три обложки).
 
 ## Что делает clean
 
@@ -75,5 +75,5 @@ python -m venv .venv
 
 ```bash
 .venv/Scripts/python.exe -m pip install pyinstaller
-.venv/Scripts/pyinstaller.exe --noconfirm --onefile --windowed --name CoverFix --collect-all tkinterdnd2 tools/run_gui.py
+.venv/Scripts/pyinstaller.exe --noconfirm --onefile --windowed --name χορεία --collect-all tkinterdnd2 tools/run_gui.py
 ```

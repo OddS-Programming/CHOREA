@@ -353,12 +353,13 @@ class App:
         self.current: FileReport | None = None
         self.selection: list[FileReport] = []
         self._baseline: dict[str, str | None] = {}
+        self._confirm = messagebox.askyesno
         self.chosen: Picture | None = None
         self._detail_photo: ImageTk.PhotoImage | None = None
         self._cover_photos: list[ImageTk.PhotoImage] = []
 
         if isinstance(root, tk.Tk):
-            root.title("CoverFix")
+            root.title("χορεία")
             root.geometry("1180x760")
             root.minsize(920, 600)
             root.configure(bg=BG)
@@ -380,7 +381,7 @@ class App:
 
         brand = tk.Frame(header, bg=BG)
         brand.pack(side="left")
-        tk.Label(brand, text="CoverFix", bg=BG, fg=TEXT, font=FONT_HEAD).pack(anchor="w")
+        tk.Label(brand, text="χορεία", bg=BG, fg=TEXT, font=FONT_HEAD).pack(anchor="w")
         tk.Label(
             brand,
             text="обложки и теги без сюрпризов",
@@ -586,7 +587,7 @@ class App:
             path for path in folder.rglob("*") if path.is_file() and path.suffix.lower() in AUDIO_SUFFIXES
         )
         if not paths:
-            messagebox.showinfo("CoverFix", "В этой папке нет аудиофайлов.")
+            messagebox.showinfo("χορεία", "В этой папке нет аудиофайлов.")
             return
         self._load(paths, replace=True)
 
@@ -796,8 +797,17 @@ class App:
     def apply_current(self) -> None:
         paths = [report.path for report in self.selection]
         if not paths:
-            messagebox.showinfo("CoverFix", "Выберите треки в списке.")
+            messagebox.showinfo("χορεία", "Выберите треки в списке.")
             return
+        if len(paths) > 1:
+            cover = "без обложки" if self.chosen is None else f"{self.chosen.type_name}, {self.chosen.resolution}"
+            if not self._confirm(
+                "χορεία",
+                f"Записать файлов: {len(paths)}\nОбложка: {cover}\n"
+                "Изменённые поля применятся ко всем, остальные останутся как есть.\n"
+                "Рядом с каждым файлом появится копия .bak.",
+            ):
+                return
         self._apply(paths)
 
     def _changes(self) -> dict[str, str]:
@@ -815,10 +825,10 @@ class App:
 
     def apply_all(self) -> None:
         if not self.order:
-            messagebox.showinfo("CoverFix", "Список пуст.")
+            messagebox.showinfo("χορεία", "Список пуст.")
             return
         if not messagebox.askyesno(
-            "CoverFix",
+            "χορεία",
             f"Применить выбранную обложку и поля ко всем трекам ({len(self.order)})?\n"
             "Перед записью создаются копии .bak.",
         ):

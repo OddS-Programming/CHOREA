@@ -6,3 +6,5 @@ dist/
 .superpowers/
 tests/assets/*.tmp
 tests/assets/*.bak
+
+*.egg-info/

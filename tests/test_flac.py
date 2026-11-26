@@ -4,7 +4,7 @@ from pathlib import Path
 
 from mutagen.flac import FLAC
 
-from coverfix.core import clean_file, inspect_file
+from choreia.core import clean_file, inspect_file
 import helpers
 
 

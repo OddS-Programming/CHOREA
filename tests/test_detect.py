@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from coverfix.detect import detect_container
+from choreia.detect import detect_container
 
 
 def test_detect_mp3_by_magic_not_extension(tmp_path: Path, asset) -> None:

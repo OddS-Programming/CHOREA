@@ -1,7 +1,7 @@
 """Build a small demo album so the window can be tried without real music.
 
 Run: .venv/Scripts/python.exe tools/make_demo.py
-Creates ../coverfix-demo with six tracks, tags and covers.
+Creates ../choreia-demo with six tracks, tags and covers.
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from coverfix.core import clean_file  # noqa: E402
-from coverfix.model import make_picture  # noqa: E402
+from choreia.core import clean_file  # noqa: E402
+from choreia.model import make_picture  # noqa: E402
 
-TARGET = Path(__file__).resolve().parents[2] / "coverfix-demo"
+TARGET = Path(__file__).resolve().parents[2] / "choreia-demo"
 FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 
 TRACKS = [
