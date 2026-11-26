@@ -665,6 +665,8 @@ body.np-open .player { visibility: hidden; }
 }
 
 .selection-bar .ghost { padding: 6px 12px; }
+.selection-bar .danger { color: #ef4444; border-color: rgba(239, 68, 68, 0.35); }
+.selection-bar .danger:hover { background: rgba(239, 68, 68, 0.12); border-color: #ef4444; }
 .selection-bar span { color: var(--muted); font-size: 12px; }
 .row.selected { background: var(--accent-soft); }
 .row.selected .row-title { color: var(--accent); }

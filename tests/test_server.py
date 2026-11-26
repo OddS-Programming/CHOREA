@@ -355,6 +355,35 @@ def test_upload_writes_file_into_folder(server, tmp_path) -> None:
     assert (folder / "new track (2).mp3").exists()
 
 
+def test_delete_tracks_moves_to_recycle(server, monkeypatch) -> None:
+    import choreia.player.dialogs as dialogs
+
+    running, library, track = server
+    library.add_folder(track.parent)
+    deleted = []
+    monkeypatch.setattr(dialogs, "recycle", lambda path: deleted.append(path) or True)
+
+    status, payload = _post(running, "/api/delete-tracks", {"ids": [1]})
+
+    assert status == 200
+    assert payload["removed"] == 1
+    assert deleted and deleted[0] == track
+    assert library.track(1) is None
+
+
+def test_delete_refuses_tracks_outside_library(server, monkeypatch) -> None:
+    import choreia.player.dialogs as dialogs
+
+    running, library, _track = server
+    monkeypatch.setattr(dialogs, "recycle", lambda path: True)
+
+    status, payload = _post(running, "/api/delete-tracks", {"ids": [1]})
+
+    assert status == 200
+    assert payload["removed"] == 0
+    assert library.track(1) is not None
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

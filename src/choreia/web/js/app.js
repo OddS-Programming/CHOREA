@@ -9,6 +9,7 @@ const state = {
   currentId: null,
   queue: [],
   queueIndex: -1,
+  history: [],
   shuffle: false,
   repeat: "off",
   folders: [],
@@ -114,6 +115,7 @@ const el = {
   selectionEdit: document.getElementById("selection-edit"),
   selectionPlay: document.getElementById("selection-play"),
   selectionClear: document.getElementById("selection-clear"),
+  selectionDelete: document.getElementById("selection-delete"),
   uploadFiles: document.getElementById("upload-files"),
   spectrum: document.getElementById("spectrum"),
   toast: document.getElementById("toast"),
@@ -309,10 +311,17 @@ function setQueueFromList() {
   state.queueIndex = state.queue.indexOf(state.currentId);
 }
 
-function playTrack(id) {
+function playTrack(id, record = true) {
   const track = trackById(id);
   if (!track) return;
-  if (!state.queue.length || !state.queue.includes(id)) setQueueFromList();
+  if (!state.queue.length || !state.queue.includes(id)) {
+    setQueueFromList();
+    state.history = [];
+  }
+  if (record && state.currentId && state.currentId !== id) {
+    state.history.push(state.currentId);
+    if (state.history.length > 100) state.history.shift();
+  }
   state.queueIndex = state.queue.indexOf(id);
   state.currentId = id;
   el.audio.src = API.media(id);
@@ -361,22 +370,35 @@ function nextTrack(step = 1) {
     el.audio.play().catch(() => {});
     return;
   }
-  let index;
+
   if (state.shuffle) {
-    index = Math.floor(Math.random() * state.queue.length);
-    if (state.queue.length > 1 && state.queue[index] === state.currentId) {
-      index = (index + 1) % state.queue.length;
+    if (step < 0) {
+      const previous = state.history.pop();
+      if (previous !== undefined) {
+        playTrack(previous, false);
+        return;
+      }
+    } else {
+      const candidates = state.queue.filter(
+        (id) => id !== state.currentId && !state.history.slice(-5).includes(id)
+      );
+      const pool = candidates.length
+        ? candidates
+        : state.queue.filter((id) => id !== state.currentId);
+      const source = pool.length ? pool : state.queue;
+      playTrack(source[Math.floor(Math.random() * source.length)]);
+      return;
     }
-  } else {
-    index = state.queueIndex + step;
-    if (index >= state.queue.length) {
-      if (state.repeat === "all") index = 0;
-      else { el.audio.pause(); return; }
-    }
-    if (index < 0) {
-      if (state.repeat === "all") index = state.queue.length - 1;
-      else index = 0;
-    }
+  }
+
+  let index = state.queueIndex + step;
+  if (index >= state.queue.length) {
+    if (state.repeat === "all") index = 0;
+    else { el.audio.pause(); return; }
+  }
+  if (index < 0) {
+    if (state.repeat === "all") index = state.queue.length - 1;
+    else index = 0;
   }
   playTrack(state.queue[index]);
 }
@@ -859,6 +881,26 @@ async function handleUpload(files) {
   toast(failed ? `Загружено: ${added}, ошибок: ${failed}` : `Загружено треков: ${added}`);
   await openFolder(state.collection.path, false);
   await loadTracks();
+}
+
+async function refreshCurrentView() {
+  if (state.selection.size) return;
+  if (!el.askModal.hidden || !el.editModal.hidden || !el.lyricsModal.hidden) return;
+  const scroller = document.querySelector("#view .scroll, #view .list-body");
+  const top = scroller ? scroller.scrollTop : 0;
+
+  if (state.view === "folder" && state.collection?.path) {
+    await openFolder(state.collection.path, false);
+  } else if (state.view === "album" && state.collection?.album) {
+    await openAlbum(state.collection.album, state.collection.artist);
+  } else if (state.view === "library") {
+    await loadTracks();
+  } else if (state.view === "folders") {
+    await renderFolders();
+  }
+
+  const again = document.querySelector("#view .scroll, #view .list-body");
+  if (again) again.scrollTop = top;
 }
 
 function renderPlaceholder(title, text) {
@@ -1542,6 +1584,29 @@ el.selectionClear.addEventListener("click", () => {
   state.lastSelected = null;
   updateSelection();
 });
+el.selectionDelete.addEventListener("click", async () => {
+  const ids = [...state.selection];
+  if (!ids.length) return;
+  const agreed = await askConfirm(
+    "Удалить треки?",
+    `Файлы будут перемещены в корзину, записи исчезнут из библиотеки. Выбрано: ${ids.length}.`
+  );
+  if (!agreed) return;
+  try {
+    const result = await API.post("delete-tracks", { ids });
+    toast(`Удалено: ${result.removed}`);
+    state.selection = new Set();
+    state.lastSelected = null;
+    if (state.view === "folder" && state.collection?.path) {
+      await openFolder(state.collection.path, false);
+    } else if (state.view === "album" && state.collection?.album) {
+      await openAlbum(state.collection.album, state.collection.artist);
+    }
+    await loadTracks();
+  } catch (error) {
+    toast("Не удалось удалить треки");
+  }
+});
 
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
 el.uploadFiles.addEventListener("change", async () => {
@@ -1550,6 +1615,13 @@ el.uploadFiles.addEventListener("change", async () => {
   if (files.length) await handleUpload(files);
 });
 applyLyricsVisibility();
+
+window.addEventListener("focus", () => {
+  refreshCurrentView();
+});
+setInterval(() => {
+  refreshCurrentView();
+}, 8000);
 
 el.npLyricsEdit.addEventListener("click", openLyricsEditor);
 el.lyricsForm.addEventListener("submit", saveLyrics);

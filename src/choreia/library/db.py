@@ -323,6 +323,15 @@ class Library:
             rows = self._conn.execute("SELECT * FROM tracks WHERE path LIKE ?", (prefix,)).fetchall()
         return [dict(row) for row in rows]
 
+    def prune_missing(self) -> int:
+        """Drop index rows whose files are gone, so deleting a file updates the UI."""
+        with self._lock:
+            rows = self._conn.execute("SELECT path FROM tracks").fetchall()
+        missing = [row["path"] for row in rows if not Path(row["path"]).exists()]
+        if missing:
+            self.delete_tracks(missing)
+        return len(missing)
+
     def delete_tracks(self, paths: Iterable[str]) -> int:
         paths = list(paths)
         if not paths:

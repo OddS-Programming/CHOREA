@@ -74,6 +74,20 @@ class AppContext:
         self.web_root = Path(web_root)
         self.token = secrets.token_urlsafe(18)
         self.scan = ScanState()
+        self._last_prune = 0.0
+
+    def maybe_prune(self) -> None:
+        """Drop rows for files deleted outside the app, at most every 20 seconds."""
+        import time
+
+        now = time.monotonic()
+        if now - self._last_prune < 20:
+            return
+        self._last_prune = now
+        try:
+            self.library.prune_missing()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ scan
     def start_scan(self, folder: Path | str) -> bool:
@@ -337,6 +351,32 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(500, str(exc))
                 return
             self._json({"path": str(target)})
+            return
+
+        if path == "/api/delete-tracks":
+            from .dialogs import recycle
+
+            payload = self._read_json()
+            ids = [int(value) for value in (payload.get("ids") or [])][:500]
+            library = self.context.library
+            roots = [
+                os.path.normpath(folder["path"]).lower() for folder in library.folders()
+            ]
+            removed = 0
+            for track_id in ids:
+                track = library.track(track_id)
+                if track is None:
+                    continue
+                target = Path(track["path"])
+                key = os.path.normpath(str(target)).lower()
+                inside = any(key.startswith(root + "\\") for root in roots)
+                if not inside:
+                    continue
+                if target.exists() and not recycle(target):
+                    continue
+                library.delete_tracks([str(target)])
+                removed += 1
+            self._json({"removed": removed})
             return
 
         if path == "/api/upload":
@@ -633,6 +673,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == "browse":
             import os
 
+            self.context.maybe_prune()
             directory = (query.get("path") or [""])[0]
             if not directory:
                 self._error(400, "path required")
@@ -677,6 +718,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"lyrics": payload})
             return
         if route == "tracks":
+            self.context.maybe_prune()
             sort = (query.get("sort") or ["artist"])[0]
             search = (query.get("q") or [""])[0]
             limit = min(int((query.get("limit") or ["500"])[0]), 2000)

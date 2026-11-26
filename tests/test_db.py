@@ -132,6 +132,23 @@ def test_album_artist_falls_back_to_solo_track(tmp_path: Path) -> None:
     library.close()
 
 
+def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    gone = tmp_path / "gone.mp3"
+    gone.write_bytes(b"x")
+    kept = tmp_path / "kept.mp3"
+    kept.write_bytes(b"x")
+    gone_id = library.upsert_track(path=str(gone), title="Gone")
+    library.upsert_track(path=str(kept), title="Kept")
+
+    gone.unlink()
+
+    assert library.prune_missing() == 1
+    assert library.track(gone_id) is None
+    assert library.count_tracks() == 1
+    library.close()
+
+
 def test_delete_tracks_by_path(tmp_path: Path) -> None:
     library = _library(tmp_path)
     library.upsert_track(path="C:/m/1.mp3", title="One")

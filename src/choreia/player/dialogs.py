@@ -2,7 +2,38 @@
 
 from __future__ import annotations
 
+import ctypes
 import subprocess
+from pathlib import Path
+
+
+def recycle(path: Path) -> bool:
+    """Move a file to the Windows Recycle Bin via SHFileOperation."""
+    class SHFILEOPSTRUCTW(ctypes.Structure):
+        _fields_ = [
+            ("hwnd", ctypes.c_void_p),
+            ("wFunc", ctypes.c_uint),
+            ("pFrom", ctypes.c_wchar_p),
+            ("pTo", ctypes.c_wchar_p),
+            ("fFlags", ctypes.c_ushort),
+            ("fAnyOperationsAborted", ctypes.c_int),
+            ("hNameMappings", ctypes.c_void_p),
+            ("lpszProgressTitle", ctypes.c_wchar_p),
+        ]
+
+    FO_DELETE = 3
+    FOF_ALLOWUNDO = 0x40
+    FOF_NOCONFIRMATION = 0x10
+    FOF_SILENT = 0x4
+
+    operation = SHFILEOPSTRUCTW()
+    operation.hwnd = None
+    operation.wFunc = FO_DELETE
+    operation.pFrom = str(path) + "\0\0"
+    operation.pTo = None
+    operation.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT
+    result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(operation))
+    return result == 0
 
 SCRIPT = (
     "Add-Type -AssemblyName System.Windows.Forms;"
