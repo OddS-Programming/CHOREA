@@ -123,6 +123,7 @@ class AppContext:
         self.web_root = Path(web_root)
         self.token = secrets.token_urlsafe(18)
         self.scan = ScanState()
+        self._scan_thread: threading.Thread | None = None
         self._last_prune = 0.0
         self.covers: dict[str, str] = {}
 
@@ -143,7 +144,14 @@ class AppContext:
     def start_scan(self, folder: Path | str) -> bool:
         with self.scan.lock:
             if self.scan.running:
-                return False
+                worker = self._scan_thread
+                if worker is not None and not worker.is_alive():
+                    # A worker vanished without clearing the flag; recover instead of
+                    # refusing to scan until the next launch.
+                    self.scan.running = False
+                    self.scan.error = None
+                else:
+                    return False
             self.scan.running = True
             self.scan.done = 0
             self.scan.total = 0
@@ -168,7 +176,15 @@ class AppContext:
                 with self.scan.lock:
                     self.scan.running = False
 
-        threading.Thread(target=work, name="choreia-scan", daemon=True).start()
+        thread = threading.Thread(target=work, name="choreia-scan", daemon=True)
+        try:
+            thread.start()
+        except RuntimeError as exc:  # e.g. the system refused a new thread
+            with self.scan.lock:
+                self.scan.running = False
+                self.scan.error = str(exc)
+            return False
+        self._scan_thread = thread
         return True
 
 

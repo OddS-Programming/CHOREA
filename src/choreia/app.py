@@ -122,6 +122,18 @@ def main() -> int:
     server = Server(library, thumbs, web_root).start()
     logging.info("startup: server on port %s", server.port)
 
+    # A folder can end up with no indexed tracks after a crash or a stale scan
+    # flag; rescan it once in the background instead of showing an empty library.
+    try:
+        if library.count_tracks() == 0:
+            for folder in library.folders():
+                if not library.tracks_under(folder["path"]):
+                    if server.context.start_scan(folder["path"]):
+                        logging.info("startup: rescanning %s", folder["path"])
+                    break
+    except Exception:
+        logging.exception("startup: automatic rescan failed")
+
     try:
         if find_edge() is not None:
             logging.info("startup: edge window")

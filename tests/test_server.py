@@ -576,6 +576,47 @@ def test_removing_nested_folder_keeps_its_tracks(server, tmp_path) -> None:
         time.sleep(0.05)
 
 
+def test_scan_recovers_from_a_dead_worker(server, tmp_path) -> None:
+    import threading
+    import time
+
+    running, _library, _track = server
+    context = running.context
+    context.scan.running = True
+    dead = threading.Thread(target=lambda: None)
+    dead.start()
+    dead.join()
+    context._scan_thread = dead
+    folder = tmp_path / "Empty"
+    folder.mkdir()
+
+    assert context.start_scan(folder) is True
+
+    for _ in range(100):
+        if not context.scan.snapshot()["running"]:
+            break
+        time.sleep(0.02)
+    assert context.scan.snapshot()["running"] is False
+
+
+def test_scan_reports_a_thread_that_cannot_start(server, tmp_path, monkeypatch) -> None:
+    import threading
+
+    running, _library, _track = server
+    context = running.context
+    folder = tmp_path / "Empty"
+    folder.mkdir()
+
+    def boom(self):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", boom)
+
+    assert context.start_scan(folder) is False
+    assert context.scan.snapshot()["running"] is False
+    assert "thread" in (context.scan.snapshot()["error"] or "")
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 
