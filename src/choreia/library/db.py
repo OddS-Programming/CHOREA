@@ -319,22 +319,27 @@ class Library:
 
         with self._lock:
             groups = self._conn.execute(
-                "SELECT album, COUNT(*) AS tracks, MIN(NULLIF(cover_hash, '')) AS cover_hash "
-                "FROM tracks WHERE album != '' "
+                "SELECT album, COUNT(*) AS tracks FROM tracks WHERE album != '' "
                 "GROUP BY album COLLATE NOCASE ORDER BY album COLLATE NOCASE"
             ).fetchall()
             albums = []
             for group in groups:
                 tracks = self._conn.execute(
-                    "SELECT artist, album_artist FROM tracks WHERE album = ? COLLATE NOCASE",
+                    "SELECT id, artist, album_artist, cover_hash FROM tracks "
+                    "WHERE album = ? COLLATE NOCASE "
+                    "ORDER BY COALESCE(disc_no, 0), COALESCE(track_no, 0), title COLLATE NOCASE",
                     (group["album"],),
                 ).fetchall()
+                # The grid shows the first track that has art, and the album-cover
+                # dialog rewrites exactly that file.
+                cover = next((row for row in tracks if row["cover_hash"]), tracks[0] if tracks else None)
                 albums.append(
                     {
                         "album": group["album"],
                         "album_artist": primary_artist(list(tracks)),
                         "tracks": group["tracks"],
-                        "cover_hash": group["cover_hash"],
+                        "cover_hash": cover["cover_hash"] if cover else "",
+                        "cover_track_id": int(cover["id"]) if cover else None,
                     }
                 )
         return albums

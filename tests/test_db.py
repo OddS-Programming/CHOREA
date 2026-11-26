@@ -198,6 +198,34 @@ def test_remove_parent_folder_keeps_tracks_of_the_nested_root(tmp_path: Path) ->
     library.close()
 
 
+def test_albums_pick_the_first_track_cover_in_order(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(path="C:/m/b.mp3", title="B", artist="A", album="X", track_no=2, cover_hash="zzz")
+    first = library.upsert_track(
+        path="C:/m/a.mp3", title="A", artist="A", album="X", track_no=1, cover_hash="aaa"
+    )
+
+    album = library.albums()[0]
+
+    assert album["cover_hash"] == "aaa"
+    assert album["cover_track_id"] == first
+    library.close()
+
+
+def test_albums_fall_back_to_the_first_covered_track(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(path="C:/m/a.mp3", title="A", artist="A", album="X", track_no=1)
+    covered = library.upsert_track(
+        path="C:/m/b.mp3", title="B", artist="A", album="X", track_no=2, cover_hash="zzz"
+    )
+
+    album = library.albums()[0]
+
+    assert album["cover_hash"] == "zzz"
+    assert album["cover_track_id"] == covered
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

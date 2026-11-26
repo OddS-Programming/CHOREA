@@ -478,14 +478,14 @@ def test_shared_open_allows_replacing_a_playing_file(server, tmp_path) -> None:
     assert running.context.library.track(1) is not None
 
 
-def test_album_cover_applies_and_removes_for_the_whole_album(server) -> None:
+def _album_with_two_tracks(server):
     import base64
     import io
 
     from PIL import Image
 
     import helpers
-    from choreia.core import clean_file, inspect_file
+    from choreia.core import clean_file
 
     running, library, track = server
     second = helpers.copy_asset("mp3", track.parent / "second.mp3")
@@ -501,6 +501,13 @@ def test_album_cover_applies_and_removes_for_the_whole_album(server) -> None:
     buffer = io.BytesIO()
     Image.new("RGB", (300, 300), (90, 60, 160)).save(buffer, "JPEG")
     cover = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+    return running, track, second, cover
+
+
+def test_album_cover_changes_only_the_album_art_track_by_default(server) -> None:
+    from choreia.core import inspect_file
+
+    running, track, second, cover = _album_with_two_tracks(server)
 
     status, payload = _post(
         running,
@@ -509,13 +516,25 @@ def test_album_cover_applies_and_removes_for_the_whole_album(server) -> None:
     )
 
     assert status == 200
+    assert payload == {"updated": 1, "failed": 0}
+    assert inspect_file(track).front_cover is not None
+    assert inspect_file(second).front_cover is None
+
+
+def test_album_cover_applies_and_removes_for_the_whole_album(server) -> None:
+    from choreia.core import inspect_file
+
+    running, track, second, cover = _album_with_two_tracks(server)
+    scope = {"album": "Album", "album_artist": "Artist", "scope": "all"}
+
+    status, payload = _post(running, "/api/album-cover", {**scope, "action": "set", "cover": cover})
+
+    assert status == 200
     assert payload == {"updated": 2, "failed": 0}
     for path in (track, second):
         assert inspect_file(path).front_cover is not None
 
-    status, payload = _post(
-        running, "/api/album-cover", {"album": "Album", "album_artist": "Artist", "action": "remove"}
-    )
+    status, payload = _post(running, "/api/album-cover", {**scope, "action": "remove"})
 
     assert status == 200
     assert payload["updated"] == 2

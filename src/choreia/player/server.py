@@ -686,9 +686,18 @@ class Handler(BaseHTTPRequestHandler):
             self._error(404, "no tracks in album")
             return
 
+        scope = str(payload.get("scope") or "track")
+        if scope == "all":
+            targets = tracks
+        else:
+            # The album art is represented by the first track that has a cover
+            # (same rule the album grid uses), so only that file is rewritten.
+            chosen = next((track for track in tracks if track["cover_hash"]), tracks[0])
+            targets = [chosen]
+
         updated = 0
         failed = 0
-        for track in tracks:
+        for track in targets:
             source = Path(track["path"])
             if not source.exists():
                 failed += 1

@@ -113,6 +113,7 @@ const el = {
   coverRemove: document.getElementById("cover-remove"),
   coverFile: document.getElementById("cover-file"),
   coverHint: document.getElementById("cover-hint"),
+  coverAll: document.getElementById("cover-all"),
   coverResults: document.getElementById("cover-results"),
   coverSave: document.getElementById("cover-save"),
   coverCancel: document.getElementById("cover-cancel"),
@@ -1243,8 +1244,9 @@ function openAlbumCover() {
   el.coverResults.innerHTML = "";
   const preview = tracks.find((track) => track.cover_hash);
   setCoverDialogPreview(preview ? API.thumb(preview.cover_hash, 320) : "");
+  el.coverAll.checked = false;
   el.coverHint.textContent = tracks.length
-    ? "Применится ко всем трекам альбома"
+    ? "Меняется обложка альбома — один файл. Массово — по галочке ниже"
     : "В альбоме нет треков";
   el.coverSave.disabled = !tracks.length;
   el.coverModal.hidden = false;
@@ -1305,6 +1307,7 @@ async function saveAlbumCover() {
       album: albumCover.album,
       album_artist: albumCover.artist,
       action: albumCover.action,
+      scope: el.coverAll.checked ? "all" : "track",
     };
     if (albumCover.action === "set") payload.cover = albumCover.dataUrl;
     const result = await API.post("album-cover", payload);
@@ -1313,7 +1316,9 @@ async function saveAlbumCover() {
     toast(
       result.failed
         ? `Обложка обновлена: ${result.updated}, ошибок: ${result.failed}`
-        : `Обложка применена: ${result.updated} треков`
+        : payload.scope === "all"
+          ? `Обложка применена ко всем трекам: ${result.updated}`
+          : "Обложка альбома обновлена"
     );
   } catch (error) {
     toast(`Не удалось записать обложку: ${error.message}`);
@@ -1874,6 +1879,12 @@ el.coverFile.addEventListener("change", () => {
     el.coverHint.textContent = file.name;
   };
   reader.readAsDataURL(file);
+});
+el.coverAll.addEventListener("change", () => {
+  if (!state.albumCover) return;
+  el.coverHint.textContent = el.coverAll.checked
+    ? "Обложка запишется во все треки альбома"
+    : "Меняется обложка альбома — один файл";
 });
 el.coverSave.addEventListener("click", saveAlbumCover);
 el.coverCancel.addEventListener("click", closeAlbumCover);
