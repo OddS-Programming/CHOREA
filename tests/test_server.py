@@ -459,6 +459,25 @@ def test_unknown_cover_key_is_404(server) -> None:
     assert status == 404
 
 
+def test_shared_open_allows_replacing_a_playing_file(server, tmp_path) -> None:
+    import sys
+
+    from choreia.atomic import write_with_backup
+    from choreia.player.server import open_shared
+
+    if sys.platform != "win32":
+        pytest.skip("Windows file sharing semantics")
+
+    running, _library, track = server
+
+    with open_shared(track) as handle:
+        assert handle.read()
+        write_with_backup(track, lambda temp: temp.write_bytes(b"new"), backup=False)
+
+    assert track.read_bytes() == b"new"
+    assert running.context.library.track(1) is not None
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

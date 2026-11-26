@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -21,6 +22,46 @@ def _discard(path: Path) -> None:
     except PermissionError:
         os.chmod(path, stat.S_IWRITE)
         path.unlink(missing_ok=True)
+
+
+def _windows_replace(temporary: Path, target: Path) -> bool:
+    """Swap files through ReplaceFileW, the one API that works while a reader streams."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        replace_file = kernel32.ReplaceFileW
+        replace_file.restype = wintypes.BOOL
+        replace_file.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.LPVOID,
+        ]
+        return bool(replace_file(str(target), str(temporary), None, 0, None, None))
+    except (ImportError, OSError, ValueError):
+        return False
+
+
+def _swap_in(temporary: Path, target: Path) -> None:
+    """Replace `target` with `temporary`, tolerating readers and indexers."""
+    last_error: OSError | None = None
+    for attempt in range(3):
+        try:
+            os.replace(temporary, target)
+            return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.06 * (attempt + 1))
+    if _windows_replace(temporary, target):
+        return
+    assert last_error is not None
+    raise last_error
 
 
 def write_with_backup(
@@ -48,7 +89,7 @@ def write_with_backup(
         raise
 
     try:
-        os.replace(temporary, path)
+        _swap_in(temporary, path)
     except BaseException:
         _discard(temporary)
         raise

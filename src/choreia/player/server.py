@@ -39,6 +39,55 @@ CHUNK = 256 * 1024
 LRC_PATTERN = re.compile(r"\[(\d{1,3}):(\d{1,2}(?:[.,]\d{1,3})?)\]")
 
 
+def open_shared(path: Path):
+    """Open a file for reading without blocking a later rename on Windows.
+
+    Playback streams the current file over HTTP. With a plain open() Windows keeps
+    the target locked, so saving fresh tags over the playing track fails with
+    WinError 5; FILE_SHARE_DELETE lets os.replace swap the file while the stream
+    keeps reading the old contents.
+    """
+    if os.name != "nt":
+        return open(path, "rb")
+    try:
+        import ctypes
+        import msvcrt
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        create_file = kernel32.CreateFileW
+        create_file.restype = wintypes.HANDLE
+        create_file.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.LPVOID,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        generic_read = 0x80000000
+        share_read_write_delete = 0x1 | 0x2 | 0x4
+        open_existing = 3
+        attribute_normal = 0x80
+        handle = create_file(
+            str(path),
+            generic_read,
+            share_read_write_delete,
+            None,
+            open_existing,
+            attribute_normal,
+            None,
+        )
+        invalid = ctypes.c_void_p(-1).value
+        if handle is None or handle == invalid:
+            return open(path, "rb")
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        return os.fdopen(descriptor, "rb")
+    except (ImportError, OSError, ValueError):
+        return open(path, "rb")
+
+
 def split_lyrics(text: str) -> tuple[str, str | None]:
     """Return plain lyrics and the original LRC text when it carries timestamps."""
     stripped = text.strip()
@@ -204,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.command == "HEAD":
             return
-        with path.open("rb") as handle:
+        with open_shared(path) as handle:
             handle.seek(start)
             remaining = length
             while remaining > 0:
