@@ -197,7 +197,7 @@ function renderRows() {
   const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 6);
   const end = Math.min(state.tracks.length, Math.ceil((scrollTop + height) / ROW_HEIGHT) + 6);
   rowsEl.style.transform = `translateY(${start * ROW_HEIGHT}px)`;
-  rowsEl.innerHTML = state.tracks.slice(start, end).map(rowMarkup).join("");
+  rowsEl.innerHTML = state.tracks.slice(start, end).map((track) => rowMarkup(track, false)).join("");
 }
 
 function renderLibrary() {
@@ -565,7 +565,7 @@ async function openPlaylist(id) {
         <button class="ghost danger" id="playlist-delete">Удалить</button>
       </div>
       <div class="scroll">${data.tracks.length
-        ? data.tracks.map(rowMarkup).join("")
+        ? data.tracks.map((track) => rowMarkup(track, false)).join("")
         : '<div class="empty"><div><h2>Пусто</h2><p>Добавьте треки кнопкой ＋ в библиотеке.</p></div></div>'}</div>`;
   } catch (error) {
     toast(`Не удалось открыть плейлист: ${error.message}`);
@@ -676,6 +676,7 @@ function renderCollection() {
   counts.push(`${collection.tracks.length} треков`);
   const parts = [`<div class="playlist-toolbar">
     ${collection.parent ? '<button class="ghost" id="collection-back">← Назад</button>' : ""}
+    ${collection.kind === "folder" ? '<button class="ghost" id="folder-add-tracks">＋ Добавить треки</button>' : ""}
     <span class="hint">${counts.join(" · ")}</span>
   </div>`, '<div class="scroll">'];
   for (const folder of collection.folders || []) parts.push(folderRow(folder));
@@ -740,7 +741,7 @@ async function renderAlbums() {
 
 async function openAlbum(album, artist) {
   try {
-    const data = await API.get("albums/tracks", { album, artist });
+    const data = await API.get("albums/tracks", { album });
     state.view = "album";
     state.collection = { kind: "album", album, artist, tracks: data.tracks, parent: false };
     state.selection = new Set();
@@ -1137,6 +1138,20 @@ el.view.addEventListener("click", async (event) => {
   }
   if (event.target.id === "collection-back") {
     await folderBack();
+    return;
+  }
+  if (event.target.id === "folder-add-tracks") {
+    try {
+      const picked = await API.post("pick-files", {});
+      if (picked.paths && picked.paths.length) {
+        const result = await API.post("add-files", { paths: picked.paths });
+        toast(`Добавлено треков: ${result.added}`);
+        await openFolder(state.collection.path, false);
+        await loadTracks();
+      }
+    } catch (error) {
+      toast(`Не удалось добавить треки: ${error.message}`);
+    }
     return;
   }
   const subfolder = event.target.closest("[data-subfolder]");

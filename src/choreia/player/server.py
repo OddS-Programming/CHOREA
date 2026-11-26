@@ -298,6 +298,30 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"path": pick_folder()})
             return
 
+        if path == "/api/pick-files":
+            from .dialogs import pick_files
+
+            self._json({"paths": pick_files()})
+            return
+
+        if path == "/api/add-files":
+            from ..library.scanner import AUDIO_SUFFIXES
+
+            payload = self._read_json()
+            raw_paths = payload.get("paths") or []
+            added = 0
+            for raw in raw_paths[:500]:
+                candidate = Path(str(raw))
+                if not candidate.is_file() or candidate.suffix.lower() not in AUDIO_SUFFIXES:
+                    continue
+                try:
+                    refresh_track(self.context.library, self.context.thumbs, candidate)
+                    added += 1
+                except Exception:
+                    continue
+            self._json({"added": added})
+            return
+
         if path == "/api/reveal":
             payload = self._read_json()
             target = Path(str(payload.get("path", "")))

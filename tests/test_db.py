@@ -120,6 +120,18 @@ def test_albums_group_tracks(tmp_path: Path, asset) -> None:
     library.close()
 
 
+def test_album_artist_falls_back_to_solo_track(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(path="C:/m/1.mp3", title="Solo", album="Mix", artist="Main")
+    library.upsert_track(path="C:/m/2.mp3", title="Duo", album="Mix", artist="Main feat. Guest")
+    library.upsert_track(path="C:/m/3.mp3", title="Third", album="Mix", artist="Guest")
+
+    album = library.albums()[0]
+
+    assert album["album_artist"] == "Main"
+    library.close()
+
+
 def test_delete_tracks_by_path(tmp_path: Path) -> None:
     library = _library(tmp_path)
     library.upsert_track(path="C:/m/1.mp3", title="One")

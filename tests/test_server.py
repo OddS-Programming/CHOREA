@@ -273,6 +273,19 @@ def test_playlist_api(server) -> None:
     assert _post(running, "/api/playlists", {"name": "Mix"})[0] == 409
 
 
+def test_add_files_indexes_tracks(server, tmp_path) -> None:
+    import helpers
+
+    running, library, _track = server
+    extra = helpers.copy_asset("mp3", tmp_path / "extra.mp3")
+
+    status, payload = _post(running, "/api/add-files", {"paths": [str(extra), "C:/nope.mp3"]})
+
+    assert status == 200
+    assert payload["added"] == 1
+    assert library.track_by_path(str(extra)) is not None
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

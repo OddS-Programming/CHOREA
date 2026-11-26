@@ -266,15 +266,44 @@ class Library:
         return [dict(row) for row in rows]
 
     def albums(self) -> list[dict]:
+        from collections import Counter
+
+        markers = ("feat", "ft.", "&", ",", " x ")
+
+        def primary_artist(rows: list) -> str:
+            named = [row["album_artist"] for row in rows if str(row["album_artist"] or "").strip()]
+            if named:
+                return Counter(named).most_common(1)[0][0]
+            solo = [
+                row["artist"]
+                for row in rows
+                if str(row["artist"] or "").strip()
+                and not any(marker in str(row["artist"]).lower() for marker in markers)
+            ]
+            pool = solo or [row["artist"] for row in rows if str(row["artist"] or "").strip()]
+            return Counter(pool).most_common(1)[0][0] if pool else ""
+
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT album, album_artist, COUNT(*) AS tracks, "
-                "MIN(NULLIF(cover_hash, '')) AS cover_hash "
+            groups = self._conn.execute(
+                "SELECT album, COUNT(*) AS tracks, MIN(NULLIF(cover_hash, '')) AS cover_hash "
                 "FROM tracks WHERE album != '' "
-                "GROUP BY album COLLATE NOCASE, album_artist COLLATE NOCASE "
-                "ORDER BY album COLLATE NOCASE"
+                "GROUP BY album COLLATE NOCASE ORDER BY album COLLATE NOCASE"
             ).fetchall()
-        return [dict(row) for row in rows]
+            albums = []
+            for group in groups:
+                tracks = self._conn.execute(
+                    "SELECT artist, album_artist FROM tracks WHERE album = ? COLLATE NOCASE",
+                    (group["album"],),
+                ).fetchall()
+                albums.append(
+                    {
+                        "album": group["album"],
+                        "album_artist": primary_artist(list(tracks)),
+                        "tracks": group["tracks"],
+                        "cover_hash": group["cover_hash"],
+                    }
+                )
+        return albums
 
     def tracks_under(self, folder_path: str) -> Iterable[dict]:
         prefix = folder_path.rstrip("\\/") + "%"
