@@ -1580,7 +1580,14 @@ el.view.addEventListener("click", async (event) => {
     await openFolder(row.dataset.folder);
     return;
   }
-  if (row.dataset.id) playTrack(Number(row.dataset.id));
+  if (row.dataset.id) {
+    const id = Number(row.dataset.id);
+    if (id === state.currentId) {
+      togglePlay();
+      return;
+    }
+    playTrack(id);
+  }
 });
 
 el.nav.addEventListener("click", (event) => {
