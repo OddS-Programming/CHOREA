@@ -19,6 +19,8 @@ const state = {
   lyricLines: [],
   lyricIndex: -1,
   followPauseUntil: 0,
+  askResolve: null,
+  askMode: "text",
   loading: true,
 };
 
@@ -86,6 +88,12 @@ const el = {
   editCoverFile: document.getElementById("edit-cover-file"),
   editCoverHint: document.getElementById("edit-cover-hint"),
   editCoverAlbum: document.getElementById("edit-cover-album"),
+  askModal: document.getElementById("ask-modal"),
+  askTitle: document.getElementById("ask-title"),
+  askText: document.getElementById("ask-text"),
+  askInput: document.getElementById("ask-input"),
+  askOk: document.getElementById("ask-ok"),
+  askCancel: document.getElementById("ask-cancel"),
   spectrum: document.getElementById("spectrum"),
   toast: document.getElementById("toast"),
   addFolder: document.getElementById("add-folder"),
@@ -475,7 +483,11 @@ async function renderFolders() {
 }
 
 async function removeFolder(folderId) {
-  if (!window.confirm("Убрать папку из библиотеки? Файлы на диске останутся.")) return;
+  const agreed = await askConfirm(
+    "Убрать папку из библиотеки?",
+    "Файлы на диске останутся, пропадёт только запись в библиотеке."
+  );
+  if (!agreed) return;
   try {
     await API.del(`folders/${folderId}`);
     toast("Папка убрана из библиотеки");
@@ -513,7 +525,7 @@ async function renderPlaylists() {
 }
 
 async function createPlaylistPrompt() {
-  const name = window.prompt("Название плейлиста");
+  const name = await askText("Новый плейлист", "", "Название плейлиста");
   if (!name || !name.trim()) return;
   try {
     await API.post("playlists", { name: name.trim() });
@@ -548,6 +560,42 @@ function closeMenu() {
   document.querySelectorAll(".menu").forEach((node) => node.remove());
 }
 
+function askText(title, value = "", placeholder = "") {
+  return new Promise((resolve) => {
+    state.askResolve = resolve;
+    state.askMode = "text";
+    el.askTitle.textContent = title;
+    el.askText.hidden = true;
+    el.askInput.hidden = false;
+    el.askInput.value = value;
+    el.askInput.placeholder = placeholder;
+    el.askModal.hidden = false;
+    requestAnimationFrame(() => {
+      el.askInput.focus();
+      el.askInput.select();
+    });
+  });
+}
+
+function askConfirm(title, text) {
+  return new Promise((resolve) => {
+    state.askResolve = resolve;
+    state.askMode = "confirm";
+    el.askTitle.textContent = title;
+    el.askText.textContent = text;
+    el.askText.hidden = false;
+    el.askInput.hidden = true;
+    el.askModal.hidden = false;
+  });
+}
+
+function closeAsk(result) {
+  const resolve = state.askResolve;
+  state.askResolve = null;
+  el.askModal.hidden = true;
+  if (resolve) resolve(result);
+}
+
 async function openAddMenu(anchor, trackId) {
   closeMenu();
   let playlists = [];
@@ -571,7 +619,7 @@ async function openAddMenu(anchor, trackId) {
     if (!button) return;
     try {
       if (button.dataset.new) {
-        const name = window.prompt("Название плейлиста");
+        const name = await askText("Новый плейлист", "", "Название плейлиста");
         if (!name || !name.trim()) return;
         const created = await API.post("playlists", { name: name.trim() });
         await API.post(`playlists/${created.id}/tracks`, { track_id: trackId });
@@ -853,7 +901,7 @@ async function saveLyrics(event) {
 
 async function clearLyrics() {
   if (!state.currentId) return;
-  if (!window.confirm("Удалить текст у этого трека?")) return;
+  if (!(await askConfirm("Удалить текст?", "Текст будет удалён у этого трека."))) return;
   try {
     await API.del(`lyrics/${state.currentId}`);
     closeLyricsEditor();
@@ -865,7 +913,7 @@ async function clearLyrics() {
 }
 
 /* ---------------------------------------------------------------- wiring */
-el.view.addEventListener("click", (event) => {
+el.view.addEventListener("click", async (event) => {
   const add = event.target.closest(".row-add");
   if (add) {
     event.stopPropagation();
@@ -881,11 +929,11 @@ el.view.addEventListener("click", (event) => {
     return;
   }
   if (event.target.id === "playlist-delete" && state.playlist) {
-    if (window.confirm(`Удалить плейлист «${state.playlist.playlist.name}»?`)) {
-      API.del(`playlists/${state.playlist.playlist.id}`).then(() => {
-        state.playlist = null;
-        renderPlaylists();
-      });
+    const playlistName = state.playlist.playlist.name;
+    if (await askConfirm(`Удалить плейлист «${playlistName}»?`, "Треки останутся в библиотеке.")) {
+      await API.del(`playlists/${state.playlist.playlist.id}`);
+      state.playlist = null;
+      renderPlaylists();
     }
     return;
   }
@@ -1036,6 +1084,22 @@ el.editModal.addEventListener("click", (event) => {
   if (event.target === el.editModal) closeEditor();
 });
 
+el.askOk.addEventListener("click", () => {
+  closeAsk(state.askMode === "text" ? el.askInput.value.trim() : true);
+});
+el.askCancel.addEventListener("click", () => {
+  closeAsk(state.askMode === "text" ? null : false);
+});
+el.askInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    el.askOk.click();
+  }
+});
+el.askModal.addEventListener("click", (event) => {
+  if (event.target === el.askModal) closeAsk(state.askMode === "text" ? null : false);
+});
+
 el.npLyricsEdit.addEventListener("click", openLyricsEditor);
 el.lyricsForm.addEventListener("submit", saveLyrics);
 el.lyricsClose.addEventListener("click", closeLyricsEditor);
@@ -1067,7 +1131,8 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "KeyP") nextTrack(-1);
   if (event.code === "KeyM") { el.audio.muted = !el.audio.muted; el.mute.textContent = el.audio.muted ? "▯" : "▮"; }
   if (event.code === "Escape") {
-    if (!el.lyricsModal.hidden) closeLyricsEditor();
+    if (!el.askModal.hidden) closeAsk(state.askMode === "text" ? null : false);
+    else if (!el.lyricsModal.hidden) closeLyricsEditor();
     else if (!el.editModal.hidden) closeEditor();
     else closeNowPlaying();
   }

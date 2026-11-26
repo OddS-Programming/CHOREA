@@ -164,6 +164,18 @@
   </form>
 </div>
 
+<div class="modal" id="ask-modal" hidden>
+  <div class="modal-card ask-card">
+    <div class="modal-title" id="ask-title"></div>
+    <div class="modal-text" id="ask-text"></div>
+    <input class="ask-input" id="ask-input" type="text" autocomplete="off">
+    <div class="modal-actions">
+      <button type="button" class="ghost" id="ask-cancel">Отмена</button>
+      <button type="button" class="play-btn modal-save" id="ask-ok">ОК</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden></div>
 <audio id="audio" preload="metadata"></audio>
 <script src="/static/js/api.js"></script>

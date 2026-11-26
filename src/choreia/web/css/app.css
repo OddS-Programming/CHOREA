@@ -624,6 +624,19 @@ body.np-open .player { visibility: hidden; }
 
 .menu button:hover { background: var(--surface-2); }
 
+.ask-card { width: min(430px, 92vw); }
+.modal-text { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.ask-input {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+}
+.ask-input:focus { border-color: var(--accent); }
+
 .modal {
   position: fixed;
   inset: 0;
