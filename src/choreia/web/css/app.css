@@ -368,13 +368,19 @@ button { font: inherit; color: inherit; }
 }
 
 .np-body.with-lyrics {
-  grid-template-columns: minmax(300px, 440px) minmax(320px, 540px);
+  grid-template-columns: minmax(0, 360px) minmax(320px, 540px);
 }
 
-.np-left { display: grid; justify-items: center; gap: 14px; min-width: 0; }
+.np-left {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  min-width: 0;
+  width: 100%;
+  max-width: 320px;
+}
 .np-right { display: none; min-width: 0; height: min(66vh, 560px); }
 .np-body.with-lyrics .np-right { display: block; }
-.np-body.with-lyrics .np-cover { width: min(30vh, 260px); height: min(30vh, 260px); }
 .np-body.with-lyrics .np-lyrics { height: 100%; max-height: none; text-align: left; font-size: 15px; line-height: 1.65; padding: 0 8px 0 0; }
 
 .lyric-line { cursor: pointer; }
@@ -383,13 +389,12 @@ button { font: inherit; color: inherit; }
 @media (max-width: 900px) {
   .np-body.with-lyrics { grid-template-columns: minmax(0, 1fr); }
   .np-right { height: 34vh; }
-  .np-body.with-lyrics .np-cover { width: min(26vh, 200px); height: min(26vh, 200px); }
   .np-body.with-lyrics .np-lyrics { padding: 18% 8px 24% 0; }
 }
 
 .np-cover {
-  width: min(38vh, 340px);
-  height: min(38vh, 340px);
+  width: min(32vh, 300px);
+  height: min(32vh, 300px);
   border-radius: 18px;
   overflow: hidden;
   box-shadow: 0 40px 80px rgba(0, 0, 0, 0.55);
@@ -405,7 +410,7 @@ button { font: inherit; color: inherit; }
 .np-artist { color: var(--muted); margin-top: 4px; }
 .np-album { color: var(--dim); font-size: 12px; margin-top: 2px; }
 
-.np-spectrum { width: 100%; max-width: 520px; height: 90px; opacity: 0.85; }
+.np-spectrum { width: 100%; max-width: 300px; height: 72px; opacity: 0.85; }
 
 .np-lyrics {
   color: var(--muted);
