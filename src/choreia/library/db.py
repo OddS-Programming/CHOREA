@@ -289,15 +289,23 @@ class Library:
     def album_tracks(self, album: str, album_artist: str = "") -> list[dict]:
         if not album.strip():
             return []
-        sql = "SELECT * FROM tracks WHERE album = ? COLLATE NOCASE"
-        params: list = [album]
-        if album_artist.strip():
-            sql += " AND album_artist = ? COLLATE NOCASE"
-            params.append(album_artist)
-        sql += " ORDER BY disc_no, track_no, title COLLATE NOCASE"
-        with self._lock:
-            rows = self._conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+
+        def query(artist: str) -> list[dict]:
+            sql = "SELECT * FROM tracks WHERE album = ? COLLATE NOCASE"
+            params: list = [album]
+            if artist.strip():
+                sql += " AND album_artist = ? COLLATE NOCASE"
+                params.append(artist)
+            sql += " ORDER BY COALESCE(disc_no, 0), COALESCE(track_no, 0), title COLLATE NOCASE"
+            with self._lock:
+                return [dict(row) for row in self._conn.execute(sql, params).fetchall()]
+
+        rows = query(album_artist)
+        if not rows and album_artist.strip():
+            # The album grid derives an artist when the tag is empty, so an exact
+            # filter must not hide every track of such an album.
+            rows = query("")
+        return rows
 
     def albums(self) -> list[dict]:
         from collections import Counter

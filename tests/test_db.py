@@ -238,6 +238,31 @@ def test_settings_with_prefix_filters_keys(tmp_path: Path) -> None:
     library.close()
 
 
+def test_album_tracks_fall_back_when_album_artist_is_empty(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(path="C:/m/a.mp3", title="One", artist="CODE10", album="DEMOVERSION")
+    library.upsert_track(path="C:/m/b.mp3", title="Two", artist="CODE10", album="DEMOVERSION")
+
+    assert len(library.album_tracks("DEMOVERSION", "CODE10")) == 2
+    assert len(library.album_tracks("DEMOVERSION")) == 2
+    library.close()
+
+
+def test_album_tracks_keep_artist_filter_when_it_matches(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(
+        path="C:/m/a.mp3", title="One", artist="A", album="Shared", album_artist="A"
+    )
+    library.upsert_track(
+        path="C:/m/b.mp3", title="Two", artist="B", album="Shared", album_artist="B"
+    )
+
+    rows = library.album_tracks("Shared", "A")
+
+    assert [row["title"] for row in rows] == ["One"]
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

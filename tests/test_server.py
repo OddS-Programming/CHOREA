@@ -744,6 +744,48 @@ def test_preferences_expose_only_ui_settings(server) -> None:
     assert json.loads(body)["preferences"]["ui.lyricsVisible"] == "1"
 
 
+def test_album_cover_works_without_album_artist_tag(server) -> None:
+    import base64
+    import io
+
+    from PIL import Image
+
+    import helpers
+    from choreia.core import clean_file, inspect_file
+
+    running, library, track = server
+    second = helpers.copy_asset("mp3", track.parent / "second.mp3")
+    shared = {"artist": "CODE10", "album": "DEMOVERSION"}
+    clean_file(track, keep=None, metadata={**shared, "title": "One"})
+    clean_file(second, keep=None, metadata={**shared, "title": "Two"})
+    library.upsert_track(
+        path=str(track), title="One", artist="CODE10", album="DEMOVERSION", duration=1.0
+    )
+    library.upsert_track(
+        path=str(second), title="Two", artist="CODE10", album="DEMOVERSION", duration=1.0
+    )
+    buffer = io.BytesIO()
+    Image.new("RGB", (300, 300), (40, 90, 160)).save(buffer, "JPEG")
+    cover = "data:image/jpeg;base64," + base64.b64encode(buffer.getvalue()).decode()
+
+    status, payload = _post(
+        running,
+        "/api/album-cover",
+        {
+            "album": "DEMOVERSION",
+            "album_artist": "CODE10",
+            "action": "set",
+            "cover": cover,
+            "scope": "all",
+        },
+    )
+
+    assert status == 200
+    assert payload == {"updated": 2, "failed": 0}
+    assert inspect_file(track).front_cover is not None
+    assert inspect_file(second).front_cover is not None
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 
