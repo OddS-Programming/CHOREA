@@ -20,6 +20,8 @@ const state = {
   lyricIndex: -1,
   followPauseUntil: 0,
   lyricsVisible: localStorage.getItem("choreia.lyricsVisible") !== "0",
+  autoLyrics: localStorage.getItem("choreia.autoLyrics") !== "0",
+  lyricsSkipped: new Set(),
   askResolve: null,
   askMode: "text",
   collection: null,
@@ -85,6 +87,7 @@ const el = {
   lyricsClose: document.getElementById("lyrics-close"),
   lyricsCancel: document.getElementById("lyrics-cancel"),
   lyricsClear: document.getElementById("lyrics-clear"),
+  lyricsFind: document.getElementById("lyrics-find"),
   editCurrent: document.getElementById("edit-current"),
   editModal: document.getElementById("edit-modal"),
   editForm: document.getElementById("edit-form"),
@@ -1097,6 +1100,15 @@ async function loadLyrics(trackId) {
   } catch (error) {
     state.lyrics = null;
   }
+  if (!state.lyrics && state.autoLyrics && !state.lyricsSkipped.has(trackId)) {
+    el.npLyrics.innerHTML = '<div class="lyrics-empty">Ищу текст…</div>';
+    try {
+      const found = await API.post(`lyrics/${trackId}/fetch`, {});
+      state.lyrics = found.lyrics;
+    } catch (error) {
+      state.lyricsSkipped.add(trackId);
+    }
+  }
   renderLyrics();
 }
 
@@ -1265,11 +1277,32 @@ async function clearLyrics() {
   if (!(await askConfirm("Удалить текст?", "Текст будет удалён у этого трека."))) return;
   try {
     await API.del(`lyrics/${state.currentId}`);
+    state.lyricsSkipped.add(state.currentId);
     closeLyricsEditor();
     await loadLyrics(state.currentId);
     toast("Текст удалён");
   } catch (error) {
     toast(`Не удалось удалить текст: ${error.message}`);
+  }
+}
+
+async function findLyrics() {
+  const trackId = state.currentId || state.editing?.id;
+  if (!trackId) return;
+  el.lyricsFind.disabled = true;
+  el.lyricsFind.textContent = "Ищу…";
+  try {
+    const found = await API.post(`lyrics/${trackId}/fetch`, {});
+    state.lyrics = found.lyrics;
+    state.lyricsSkipped.delete(trackId);
+    el.lyricsText.value = found.lyrics.synced || found.lyrics.plain || "";
+    renderLyrics();
+    toast("Текст найден");
+  } catch (error) {
+    toast("Текст не найден");
+  } finally {
+    el.lyricsFind.disabled = false;
+    el.lyricsFind.textContent = "Найти в интернете";
   }
 }
 
@@ -1523,6 +1556,7 @@ el.lyricsForm.addEventListener("submit", saveLyrics);
 el.lyricsClose.addEventListener("click", closeLyricsEditor);
 el.lyricsCancel.addEventListener("click", closeLyricsEditor);
 el.lyricsClear.addEventListener("click", clearLyrics);
+el.lyricsFind.addEventListener("click", findLyrics);
 el.lyricsModal.addEventListener("click", (event) => {
   if (event.target === el.lyricsModal) closeLyricsEditor();
 });

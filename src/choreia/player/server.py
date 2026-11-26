@@ -262,6 +262,11 @@ class Handler(BaseHTTPRequestHandler):
             self._save_lyrics(int(lyrics_match.group(1)))
             return
 
+        lyrics_fetch = re.match(r"^/api/lyrics/(\d+)/fetch$", path)
+        if lyrics_fetch:
+            self._fetch_lyrics(int(lyrics_fetch.group(1)))
+            return
+
         if path == "/api/playlists":
             payload = self._read_json()
             name = str(payload.get("name", "")).strip()
@@ -577,6 +582,36 @@ class Handler(BaseHTTPRequestHandler):
                     continue
 
         self._json({"track": updated, "album_updated": album_updated})
+
+    def _fetch_lyrics(self, track_id: int) -> None:
+        from ..sources.lyrics import lookup
+
+        library = self.context.library
+        track = library.track(track_id)
+        if track is None:
+            self._error(404, "no track")
+            return
+        found = lookup(
+            str(track["artist"] or ""),
+            str(track["title"] or ""),
+            str(track["album"] or ""),
+            float(track["duration"] or 0),
+        )
+        if not found:
+            self._error(404, "lyrics not found")
+            return
+        plain = str(found.get("plain") or "")
+        synced = found.get("synced")
+        if not plain and synced:
+            plain, _ = split_lyrics(synced)
+        library.set_lyrics(
+            track_id,
+            plain=plain,
+            synced=synced,
+            source="lrclib",
+            instrumental=bool(found.get("instrumental")),
+        )
+        self._json({"lyrics": library.lyrics(track_id)})
 
     def _save_lyrics(self, track_id: int) -> None:
         library = self.context.library
