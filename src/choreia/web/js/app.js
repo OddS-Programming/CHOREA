@@ -94,6 +94,7 @@ const el = {
   editCoverFile: document.getElementById("edit-cover-file"),
   editCoverHint: document.getElementById("edit-cover-hint"),
   editCoverAlbum: document.getElementById("edit-cover-album"),
+  editMultiHint: document.getElementById("edit-multi-hint"),
   askModal: document.getElementById("ask-modal"),
   askTitle: document.getElementById("ask-title"),
   askText: document.getElementById("ask-text"),
@@ -676,7 +677,7 @@ function renderCollection() {
   counts.push(`${collection.tracks.length} треков`);
   const parts = [`<div class="playlist-toolbar">
     ${collection.parent ? '<button class="ghost" id="collection-back">← Назад</button>' : ""}
-    ${collection.kind === "folder" ? '<button class="ghost" id="folder-add-tracks">＋ Добавить треки</button>' : ""}
+    ${collection.kind === "folder" ? '<button class="ghost" id="folder-add-tracks">＋ Добавить треки</button><button class="ghost" id="folder-add-folder">＋ Добавить папку</button>' : ""}
     <span class="hint">${counts.join(" · ")}</span>
   </div>`, '<div class="scroll">'];
   for (const folder of collection.folders || []) parts.push(folderRow(folder));
@@ -1138,6 +1139,10 @@ el.view.addEventListener("click", async (event) => {
   }
   if (event.target.id === "collection-back") {
     await folderBack();
+    return;
+  }
+  if (event.target.id === "folder-add-folder") {
+    await addFolder();
     return;
   }
   if (event.target.id === "folder-add-tracks") {

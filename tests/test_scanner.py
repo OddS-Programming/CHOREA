@@ -90,6 +90,24 @@ def test_browse_lists_subfolders_and_tracks(tmp_path: Path, asset) -> None:
     library.close()
 
 
+def test_browse_lists_empty_folders(tmp_path: Path, asset) -> None:
+    folder = tmp_path / "Artist"
+    folder.mkdir()
+    (folder / "Empty").mkdir()
+    helpers.copy_asset("mp3", folder / "single.mp3")
+
+    library, scanner = _setup(tmp_path)
+    scanner.scan_folder(folder)
+
+    listing = library.browse(str(folder))
+    names = [item["name"] for item in listing["folders"]]
+
+    assert "Empty" in names
+    empty = next(item for item in listing["folders"] if item["name"] == "Empty")
+    assert empty["tracks"] == 0
+    library.close()
+
+
 def test_scan_removes_deleted_files(tmp_path: Path, asset) -> None:
     folder = tmp_path / "Album"
     folder.mkdir()

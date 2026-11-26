@@ -243,6 +243,18 @@ class Library:
             else:
                 tracks.append(dict(row))
 
+        # Real subdirectories, including ones with no indexed tracks yet.
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir() and not entry.name.startswith("."):
+                            folders.setdefault(entry.name, 0)
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+
         return {
             "path": directory,
             "folders": [
