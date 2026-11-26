@@ -384,6 +384,23 @@ def test_delete_refuses_tracks_outside_library(server, monkeypatch) -> None:
     assert library.track(1) is not None
 
 
+def test_single_track_endpoint(server) -> None:
+    running, _library, _track = server
+
+    status, _headers, body = _get(running, "/api/tracks/1", {"X-Token": running.context.token})
+
+    assert status == 200
+    assert json.loads(body)["track"]["title"] == "Track"
+
+
+def test_single_track_missing(server) -> None:
+    running, _library, _track = server
+
+    status, _headers, _body = _get(running, "/api/tracks/999", {"X-Token": running.context.token})
+
+    assert status == 404
+
+
 def test_cover_search_then_fetch(server, monkeypatch) -> None:
     from choreia.sources import covers
 

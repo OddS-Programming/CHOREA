@@ -729,6 +729,14 @@ class Handler(BaseHTTPRequestHandler):
         if route == "albums":
             self._json({"albums": library.albums()})
             return
+        track_match = re.match(r"^tracks/(\d+)$", route)
+        if track_match:
+            track = library.track(int(track_match.group(1)))
+            if track is None:
+                self._error(404, "no track")
+                return
+            self._json({"track": track})
+            return
         if route == "albums/tracks":
             album = (query.get("album") or [""])[0]
             artist = (query.get("artist") or [""])[0]

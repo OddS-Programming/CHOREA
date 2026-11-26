@@ -335,6 +335,7 @@ function playTrack(id, record = true) {
 }
 
 function updateNow(track) {
+  state.nowSnapshot = [track.title, track.artist, track.album, track.cover_hash].join("\u0000");
   el.nowTitle.textContent = track.title || "Без названия";
   el.nowArtist.textContent = track.artist || "";
   el.npTitle.textContent = track.title || "";
@@ -1251,6 +1252,25 @@ async function refreshAfterEdit() {
     await openAlbum(state.collection.album, state.collection.artist);
   }
   syncTransport();
+  await refreshPlayingTrack();
+}
+
+async function refreshPlayingTrack() {
+  if (!state.currentId) return;
+  let fresh =
+    state.tracks.find((track) => track.id === state.currentId) ||
+    state.collection?.tracks?.find((track) => track.id === state.currentId) ||
+    null;
+  try {
+    const data = await API.get(`tracks/${state.currentId}`);
+    if (data.track) fresh = data.track;
+  } catch (error) {
+    /* fall back to the row we already know */
+  }
+  if (!fresh) return;
+  const snapshot = [fresh.title, fresh.artist, fresh.album, fresh.cover_hash].join("\u0000");
+  if (snapshot === state.nowSnapshot) return;
+  updateNow(fresh);
 }
 
 /* ---------------------------------------------------------------- lyrics */
