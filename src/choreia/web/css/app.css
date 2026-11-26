@@ -418,8 +418,11 @@ button { font: inherit; color: inherit; }
   white-space: pre-line;
   padding: 6px 8px 6px 0;
   scroll-behavior: smooth;
+  scrollbar-width: none;
   mask-image: linear-gradient(180deg, transparent, #000 8%, #000 92%, transparent);
 }
+
+.np-lyrics::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
 .lyrics-spacer { height: 42%; }
 
@@ -654,13 +657,12 @@ body.np-open .player { visibility: hidden; }
   color: var(--dim);
   padding: 3px 0;
   opacity: 0.55;
-  transition: color 160ms ease, opacity 160ms ease, transform 160ms ease;
+  transition: color 160ms ease, opacity 160ms ease;
 }
 
 .lyric-line.active {
   color: var(--text);
   opacity: 1;
-  transform: scale(1.04);
   font-weight: 600;
 }
 
