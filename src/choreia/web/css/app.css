@@ -872,7 +872,6 @@ body.np-open .player { visibility: hidden; }
 }
 
 .view > * { animation: pop 220ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-.view.quiet-refresh > * { animation: none !important; }
 
 .row { transition: background 120ms ease, transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
 .row:hover { transform: translateX(2px); }

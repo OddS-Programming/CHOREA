@@ -904,6 +904,10 @@ function sameTrackList(left, right) {
   return true;
 }
 
+function freezeViewAnimation() {
+  for (const child of el.view.children) child.style.animation = "none";
+}
+
 async function refreshCurrentView() {
   if (refreshing) return;
   if (document.hidden) return;
@@ -914,11 +918,13 @@ async function refreshCurrentView() {
   const top = scroller()?.scrollTop || 0;
 
   refreshing = true;
-  el.view.classList.add("quiet-refresh");
   try {
     if (state.view === "folder" && state.collection?.path) {
       const data = await API.get("browse", { path: state.collection.path });
-      if (data.signature !== state.collection.signature) applyFolderData(data, false);
+      if (data.signature !== state.collection.signature) {
+        applyFolderData(data, false);
+        freezeViewAnimation();
+      }
     } else if (state.view === "library") {
       const payload = await API.get("tracks", {
         sort: state.sort, q: state.query, limit: 1000, offset: 0,
@@ -928,6 +934,7 @@ async function refreshCurrentView() {
         state.total = payload.total;
         renderLibrary();
         updatePlayingMark();
+        freezeViewAnimation();
       }
     } else if (state.view === "album" && state.collection?.album) {
       const data = await API.get("albums/tracks", {
@@ -935,6 +942,7 @@ async function refreshCurrentView() {
       });
       if (!sameTrackList(data.tracks, state.collection.tracks)) {
         await openAlbum(state.collection.album, state.collection.artist);
+        freezeViewAnimation();
       }
     } else if (state.view === "folders") {
       const payload = await API.get("folders");
@@ -943,17 +951,13 @@ async function refreshCurrentView() {
       if (before !== after) {
         state.folders = payload.folders;
         await renderFolders();
+        freezeViewAnimation();
       }
     }
   } catch (error) {
     /* a transient refresh failure must not disturb the current view */
   } finally {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        el.view.classList.remove("quiet-refresh");
-        refreshing = false;
-      });
-    });
+    refreshing = false;
   }
 
   const again = scroller();
