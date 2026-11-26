@@ -1,0 +1,10 @@
+mutagen>=1.47
+Pillow>=10
+
+[dev]
+pytest>=8
+imageio-ffmpeg>=0.5
+pyinstaller>=6
+
+[gui]
+tkinterdnd2>=0.4

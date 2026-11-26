@@ -1,0 +1,5 @@
+[console_scripts]
+coverfix = coverfix.cli:main
+
+[gui_scripts]
+coverfix-gui = coverfix.gui:main

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coverfix"
+version = "1.0.0"
+description = "Inspect and rewrite audio tag covers so exactly one picture survives"
+requires-python = ">=3.10"
+dependencies = ["mutagen>=1.47", "Pillow>=10"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "imageio-ffmpeg>=0.5", "pyinstaller>=6"]
+gui = ["tkinterdnd2>=0.4"]
+
+[project.scripts]
+coverfix = "coverfix.cli:main"
+
+[project.gui-scripts]
+coverfix-gui = "coverfix.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
