@@ -95,6 +95,8 @@ def read(path: Path) -> FileReport:
 def write(path: Path, keep: Picture | None, metadata: dict[str, str], target_id3: int = 3) -> None:
     path = Path(path)
     audio = _open(path)
+    if audio.tags is None:
+        audio.add_tags()
     tags = audio.tags
     for key in list(tags.keys()):
         del tags[key]

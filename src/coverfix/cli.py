@@ -84,13 +84,21 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _describe(exc: Exception) -> str:
+    if isinstance(exc, UnsupportedFormat):
+        return str(exc)
+    if isinstance(exc, FileNotFoundError):
+        return f"файл не найден: {exc}"
+    return f"{type(exc).__name__}: {exc}"
+
+
 def _cmd_inspect(args: argparse.Namespace) -> int:
     reports = []
     for path in args.files:
         try:
             reports.append(inspect_file(path))
-        except (FileNotFoundError, UnsupportedFormat) as exc:
-            print(f"ошибка: {exc}", file=sys.stderr)
+        except Exception as exc:
+            print(f"ошибка: {_describe(exc)}", file=sys.stderr)
             return 1
     if args.json:
         payload = [report.to_dict() for report in reports]
@@ -103,8 +111,8 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
 def _cmd_clean(args: argparse.Namespace) -> int:
     try:
         report = inspect_file(args.file)
-    except (FileNotFoundError, UnsupportedFormat) as exc:
-        print(f"ошибка: {exc}", file=sys.stderr)
+    except Exception as exc:
+        print(f"ошибка: {_describe(exc)}", file=sys.stderr)
         return 1
 
     if args.no_cover:
@@ -144,11 +152,8 @@ def _cmd_clean(args: argparse.Namespace) -> int:
             target_id3=args.id3,
             backup=not args.no_backup,
         )
-    except (FileNotFoundError, UnsupportedFormat) as exc:
-        print(f"ошибка: {exc}", file=sys.stderr)
-        return 1
     except Exception as exc:
-        print(f"ошибка записи: {exc}", file=sys.stderr)
+        print(f"ошибка записи: {_describe(exc)}", file=sys.stderr)
         return 1
 
     print(f"готово: {after.path}")

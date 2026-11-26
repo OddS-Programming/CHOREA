@@ -114,23 +114,34 @@ def read(path: Path) -> FileReport:
 
 
 def _strip(path: Path) -> None:
-    try:
-        ID3().delete(path)
-    except ID3NoHeaderError:
-        pass
+    # Remove tags in passes: an unusual order (for example APEv2 before a
+    # trailing ID3v2) only becomes reachable once the block after it is gone.
+    for _ in range(4):
+        before = path.stat().st_size
 
-    try:
-        APEv2(path).delete()
-    except APENoHeaderError:
-        pass
+        try:
+            ID3().delete(path)
+        except ID3NoHeaderError:
+            pass
 
-    trailing = [
-        region for region in scan_mp3_regions(path) if region.kind == "id3v2" and region.position == "end"
-    ]
-    if trailing:
-        cut = min(region.offset for region in trailing)
-        with path.open("r+b") as handle:
-            handle.truncate(cut)
+        try:
+            APEv2(path).delete()
+        except APENoHeaderError:
+            pass
+
+        stale = [
+            region
+            for region in scan_mp3_regions(path)
+            if region.kind in {"apev2", "id3v1"}
+            or (region.kind == "id3v2" and region.position == "end")
+        ]
+        if stale:
+            cut = min(region.offset for region in stale)
+            with path.open("r+b") as handle:
+                handle.truncate(cut)
+
+        if path.stat().st_size == before:
+            break
 
 
 def write(path: Path, keep: Picture | None, metadata: dict[str, str], target_id3: int = 3) -> None:

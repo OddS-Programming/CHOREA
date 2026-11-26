@@ -64,6 +64,20 @@ def test_trailing_id3v2_followed_by_v1_and_ape_is_located(tmp_path: Path) -> Non
     assert trailing[0].size == len(blob)
 
 
+def test_finds_large_trailing_tag(tmp_path: Path) -> None:
+    path = _mp3(tmp_path)
+    helpers.add_mp3_pictures(path)
+    blob = id3v2_block(payload=b"\x00" * (1024 * 1024 + 100))
+    before = path.stat().st_size
+    with path.open("ab") as handle:
+        handle.write(blob)
+
+    trailing = [r for r in scan_mp3_regions(path) if r.kind == "id3v2" and r.position == "end"]
+    assert len(trailing) == 1
+    assert trailing[0].offset == before
+    assert trailing[0].size == len(blob)
+
+
 def test_clean_file_has_no_trailing_regions(tmp_path: Path) -> None:
     path = _mp3(tmp_path)
     helpers.add_mp3_pictures(path)

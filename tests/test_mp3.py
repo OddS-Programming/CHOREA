@@ -127,6 +127,32 @@ def test_clean_works_on_file_without_tags(tmp_path: Path, asset) -> None:
     assert inspect_file(path).fields["title"] == "No tags"
 
 
+def test_clean_removes_trailing_tag_without_leading(tmp_path: Path, asset) -> None:
+    path = asset("mp3", tmp_path / "tone.mp3")
+    helpers.strip_leading_id3v2(path)
+    with path.open("ab") as handle:
+        handle.write(helpers.id3v2_block(payload=b"\x00" * 24))
+    assert any(r.kind == "id3v2" and r.position == "end" for r in scan_mp3_regions(path))
+
+    clean_file(path, keep=None, metadata={"title": "Trailing only"})
+
+    assert not [r for r in scan_mp3_regions(path) if r.kind == "id3v2" and r.position == "end"]
+
+
+def test_clean_removes_ape_that_sits_before_a_trailing_tag(tmp_path: Path, asset) -> None:
+    path = asset("mp3", tmp_path / "tone.mp3")
+    helpers.strip_leading_id3v2(path)
+    with path.open("ab") as handle:
+        handle.write(helpers.apev2_footer())
+        handle.write(helpers.id3v2_block(payload=b"\x00" * 24))
+        handle.write(helpers.id3v1_block())
+
+    clean_file(path, keep=None, metadata={"title": "Odd order"})
+
+    kinds = {region.kind for region in scan_mp3_regions(path)}
+    assert kinds == {"id3v2"}
+
+
 def test_backup_created_and_original_restored_on_error(tmp_path: Path, asset) -> None:
     path, _ = _mp3_with_pictures(tmp_path, asset)
     original = path.read_bytes()
