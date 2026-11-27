@@ -141,6 +141,8 @@ const el = {
   settingLyricsClear: document.getElementById("setting-lyrics-clear"),
   backupHint: document.getElementById("backup-hint"),
   settingBackupClear: document.getElementById("setting-backup-clear"),
+  updateHint: document.getElementById("update-hint"),
+  settingUpdate: document.getElementById("setting-update"),
   duplicates: document.getElementById("duplicates"),
   dropOverlay: document.getElementById("drop-overlay"),
   dataHint: document.getElementById("data-hint"),
@@ -1809,6 +1811,9 @@ async function openSettings() {
     const data = await API.get("diagnostics");
     state.diagnostics = data;
     el.settingVersion.textContent = `χορεία ${data.version}`;
+    el.updateHint.textContent = `Версия ${data.version}`;
+    el.settingUpdate.textContent = "Проверить";
+    state.update = null;
     el.dataHint.textContent = data.data_dir;
     el.lyricsCacheHint.textContent = data.lyrics_cached
       ? `Хранится текстов: ${data.lyrics_cached} · ${formatBytes(data.lyrics_bytes)}`
@@ -1852,6 +1857,50 @@ async function saveGeniusToken() {
     toast("Токен не сохранён");
   } finally {
     el.settingGeniusSave.disabled = false;
+  }
+}
+
+async function checkUpdates() {
+  el.settingUpdate.disabled = true;
+  el.settingUpdate.textContent = "Проверяю…";
+  try {
+    const data = await API.get("update/check");
+    state.update = data;
+    if (data.available) {
+      el.updateHint.textContent = `Доступна версия ${data.latest} (у вас ${data.current})`;
+      el.settingUpdate.textContent = "Обновить";
+    } else {
+      el.updateHint.textContent = `Последняя версия — ${data.latest || data.current}`;
+      el.settingUpdate.textContent = "Проверить";
+    }
+  } catch (error) {
+    el.updateHint.textContent = "Не удалось проверить обновления";
+    el.settingUpdate.textContent = "Проверить";
+  } finally {
+    el.settingUpdate.disabled = false;
+  }
+}
+
+async function applyUpdate() {
+  const update = state.update;
+  if (!update || !update.available) {
+    await checkUpdates();
+    return;
+  }
+  const agreed = await askConfirm(
+    "Обновить приложение?",
+    `Версия ${update.latest} будет скачана и установлена. Приложение закроется и запустится заново.`
+  );
+  if (!agreed) return;
+  el.settingUpdate.disabled = true;
+  el.settingUpdate.textContent = "Скачиваю…";
+  try {
+    await API.post("update/apply", {});
+    toast("Обновление скачано — приложение перезапустится");
+  } catch (error) {
+    el.settingUpdate.disabled = false;
+    el.settingUpdate.textContent = "Обновить";
+    toast(`Не удалось обновить: ${error.message}`);
   }
 }
 
@@ -2808,6 +2857,10 @@ el.view.addEventListener("drop", async (event) => {
 
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
 el.settingBackupClear.addEventListener("click", clearBackups);
+el.settingUpdate.addEventListener("click", () => {
+  if (state.update?.available) applyUpdate();
+  else checkUpdates();
+});
 el.lyricsText.addEventListener("input", updateLyricsFormat);
 el.uploadFiles.addEventListener("change", async () => {
   const files = [...el.uploadFiles.files];

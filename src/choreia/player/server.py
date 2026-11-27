@@ -14,6 +14,7 @@ import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib import request as urlrequest
 from urllib.parse import parse_qs, unquote, urlparse
 
 from ..library.db import Library
@@ -36,7 +37,25 @@ AUDIO_TYPES = {
 }
 
 CHUNK = 256 * 1024
+UPDATE_REPO = "OddS-Programming/CHOREA"
 LRC_PATTERN = re.compile(r"\[(\d{1,3}):(\d{1,2}(?:[.,]\d{1,3})?)\]")
+
+
+def version_tuple(value: str) -> tuple[int, ...]:
+    parts = [int(piece) for piece in re.findall(r"\d+", value or "")[:3]]
+    return tuple(parts) if parts else (0,)
+
+
+def latest_release() -> dict:
+    request = urlrequest.Request(
+        f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest",
+        headers={
+            "User-Agent": "Choreia/1.0",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    with urlrequest.urlopen(request, timeout=10) as response:
+        return json.loads(response.read().decode("utf-8"))
 
 
 def open_shared(path: Path):
@@ -584,6 +603,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"path": str(target), "name": target.name})
             return
 
+        if path == "/api/update/apply":
+            self._update_apply()
+            return
+
         if path == "/api/online/download":
             self._online_download()
             return
@@ -839,6 +862,93 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 continue
         return files
+
+    def _update_apply(self) -> None:
+        """Download the newest release and swap the install after the app exits."""
+        import shutil
+        import sys
+        import zipfile
+
+        from .. import __version__
+
+        if not getattr(sys, "frozen", False):
+            self._error(400, "обновление доступно только в собранном приложении")
+            return
+        try:
+            release = latest_release()
+        except Exception as exc:
+            self._error(502, f"не удалось проверить обновления: {exc}")
+            return
+        tag = str(release.get("tag_name") or "").lstrip("vV")
+        if version_tuple(tag) <= version_tuple(__version__):
+            self._error(409, "обновление не требуется")
+            return
+        asset = next(
+            (
+                item
+                for item in release.get("assets", [])
+                if str(item.get("name", "")).lower().endswith(".zip")
+            ),
+            None,
+        )
+        url = str((asset or {}).get("browser_download_url") or "")
+        if not url.startswith(f"https://github.com/{UPDATE_REPO}/"):
+            self._error(400, "в релизе нет подходящего архива")
+            return
+
+        update_dir = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "Choreia" / "update"
+        if update_dir.exists():
+            shutil.rmtree(update_dir, ignore_errors=True)
+        update_dir.mkdir(parents=True, exist_ok=True)
+        archive = update_dir / "update.zip"
+        try:
+            request = urlrequest.Request(url, headers={"User-Agent": "Choreia/1.0"})
+            with urlrequest.urlopen(request, timeout=180) as response, archive.open("wb") as handle:
+                shutil.copyfileobj(response, handle)
+            root = (update_dir / "new").resolve()
+            with zipfile.ZipFile(archive) as bundle:
+                for member in bundle.infolist():
+                    target = (root / member.filename).resolve()
+                    if not str(target).startswith(str(root)):
+                        raise RuntimeError("архив содержит недопустимый путь")
+                bundle.extractall(root)
+        except Exception as exc:
+            self._error(500, f"не удалось скачать обновление: {exc}")
+            return
+
+        executable = next(update_dir.rglob("Choreia.exe"), None)
+        if executable is None:
+            self._error(500, "в архиве нет Choreia.exe")
+            return
+        install_dir = Path(sys.executable).parent
+        script = update_dir / "apply.ps1"
+        script.write_text(
+            'Start-Sleep -Seconds 3\n'
+            f'robocopy "{executable.parent}" "{install_dir}" /MIR /NFL /NDL /NJH /NJS /R:2 /W:1\n'
+            f'Start-Process "{install_dir / "Choreia.exe"}"\n',
+            encoding="utf-8-sig",
+        )
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        try:
+            subprocess.Popen(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-File",
+                    str(script),
+                ],
+                creationflags=flags,
+                close_fds=True,
+            )
+        except OSError as exc:
+            self._error(500, f"не удалось запустить обновление: {exc}")
+            return
+        self._json({"ok": True, "version": tag})
+        threading.Timer(0.6, lambda: os._exit(0)).start()
 
     def _online_download(self) -> None:
         from pathlib import Path
@@ -1187,6 +1297,34 @@ class Handler(BaseHTTPRequestHandler):
                 except OSError:
                     continue
             self._json({"count": len(files), "bytes": total})
+            return
+        if route == "update/check":
+            from .. import __version__
+
+            try:
+                release = latest_release()
+            except Exception as exc:
+                self._error(502, f"не удалось проверить обновления: {exc}")
+                return
+            tag = str(release.get("tag_name") or "").lstrip("vV")
+            asset = next(
+                (
+                    item
+                    for item in release.get("assets", [])
+                    if str(item.get("name", "")).lower().endswith(".zip")
+                ),
+                None,
+            )
+            self._json(
+                {
+                    "current": __version__,
+                    "latest": tag,
+                    "available": version_tuple(tag) > version_tuple(__version__),
+                    "url": release.get("html_url") or "",
+                    "notes": str(release.get("body") or "")[:1500],
+                    "asset": asset.get("browser_download_url") if asset else "",
+                }
+            )
             return
         if route == "diagnostics":
             from .. import __version__

@@ -1089,6 +1089,70 @@ def test_move_a_playlist_track(server) -> None:
     assert [item["id"] for item in library.playlist_tracks(playlist)] == [second, 1]
 
 
+def test_version_tuple_orders_releases() -> None:
+    from choreia.player.server import version_tuple
+
+    assert version_tuple("v1.2.3") > version_tuple("1.2.2")
+    assert version_tuple("1.10.0") > version_tuple("1.9.9")
+    assert version_tuple("") == (0,)
+
+
+def test_update_check_reports_a_newer_release(server, monkeypatch) -> None:
+    from choreia.player import server as server_module
+
+    running, _library, _track = server
+    monkeypatch.setattr(
+        server_module,
+        "latest_release",
+        lambda: {
+            "tag_name": "v9.9.9",
+            "html_url": "https://github.com/OddS-Programming/CHOREA/releases/tag/v9.9.9",
+            "body": "notes",
+            "assets": [
+                {
+                    "name": "Choreia-9.9.9-win64.zip",
+                    "browser_download_url": "https://github.com/OddS-Programming/CHOREA/releases/download/v9.9.9/app.zip",
+                }
+            ],
+        },
+    )
+
+    status, _headers, body = _get(
+        running, "/api/update/check", {"X-Token": running.context.token}
+    )
+    payload = json.loads(body)
+
+    assert status == 200
+    assert payload["available"] is True
+    assert payload["latest"] == "9.9.9"
+    assert payload["asset"].endswith("app.zip")
+
+
+def test_update_check_keeps_the_current_version(server, monkeypatch) -> None:
+    from choreia.player import server as server_module
+
+    running, _library, _track = server
+    monkeypatch.setattr(
+        server_module,
+        "latest_release",
+        lambda: {"tag_name": "v0.0.1", "html_url": "", "body": "", "assets": []},
+    )
+
+    _status, _headers, body = _get(
+        running, "/api/update/check", {"X-Token": running.context.token}
+    )
+
+    assert json.loads(body)["available"] is False
+
+
+def test_update_apply_requires_the_packaged_app(server) -> None:
+    running, _library, _track = server
+
+    status, _payload = _post(running, "/api/update/apply", {})
+
+    assert status == 400
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 
