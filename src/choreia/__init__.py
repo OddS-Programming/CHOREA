@@ -5,7 +5,7 @@ from __future__ import annotations
 from .core import UnsupportedFormat, clean_file, inspect_file
 from .model import FIELD_LABELS, FileReport, Picture, make_picture
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 __all__ = [
     "FIELD_LABELS",
