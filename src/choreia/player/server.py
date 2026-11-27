@@ -248,7 +248,13 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
             return {}
-        return json.loads(self.rfile.read(length) or b"{}")
+        raw = self.rfile.read(length) or b"{}"
+        try:
+            payload = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            # Callers validate their required fields and answer with a 400.
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _file(self, path: Path, content_type: str | None = None, cache: str = "no-store") -> None:
         try:
@@ -781,8 +787,8 @@ class Handler(BaseHTTPRequestHandler):
         key = os.path.normpath(str(folder)).lower()
         roots = [os.path.normpath(item["path"]).lower() for item in library.folders()]
         inside = any(key == root or key.startswith(root + "\\") for root in roots)
-        if not folder.is_dir() or not inside:
-            self._error(403, "folder must be inside a library root")
+        if not folder.is_dir():
+            self._error(400, "folder not found")
             return
 
         job = secrets.token_urlsafe(6)
@@ -794,6 +800,7 @@ class Handler(BaseHTTPRequestHandler):
             "error": "",
             "title": title,
             "artist": artist,
+            "indexed": False,
         }
         with self.context.online_lock:
             if len(self.context.online_jobs) > 50:
@@ -824,10 +831,12 @@ class Handler(BaseHTTPRequestHandler):
                         clean_file(target, keep=picture, metadata=report.fields, backup=False)
                     except Exception:
                         pass
-                refresh_track(library, self.context.thumbs, target)
+                if inside:
+                    refresh_track(library, self.context.thumbs, target)
                 with self.context.online_lock:
                     state["status"] = "done"
                     state["path"] = str(target)
+                    state["indexed"] = inside
             except Exception as exc:
                 if temporary is not None:
                     try:

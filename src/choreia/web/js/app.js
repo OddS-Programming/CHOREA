@@ -28,6 +28,7 @@ const state = {
   onlineResults: [],
   onlineQuery: "",
   onlineSearched: false,
+  onlineFolder: "",
   onlineJobs: new Map(),
   onlineTimer: null,
   lyricsSkipped: new Set(),
@@ -1069,22 +1070,55 @@ async function openOnline() {
   } catch (error) {
     /* keep the folders we already know */
   }
+  if (!state.onlineFolder) state.onlineFolder = state.folders[0]?.path || "";
   renderOnline();
+}
+
+function normalizePath(value) {
+  return String(value || "").replace(/[\\/]+$/, "").toLowerCase();
+}
+
+function insideLibrary(folder) {
+  const key = normalizePath(folder);
+  return (state.folders || []).some((item) => {
+    const root = normalizePath(item.path);
+    return key === root || key.startsWith(root + "\\");
+  });
+}
+
+async function chooseOnlineFolder() {
+  const initial = state.onlineFolder || state.folders[0]?.path || "";
+  let picked;
+  try {
+    picked = await API.post("pick-folder", { initial });
+  } catch (error) {
+    toast("Не удалось открыть проводник");
+    return;
+  }
+  if (picked.cancelled || !picked.path) return;
+  state.onlineFolder = picked.path;
+  savePreference("ui.downloadFolder", picked.path);
+  renderOnline();
+  toast(
+    insideLibrary(picked.path)
+      ? "Скачанные треки попадут в библиотеку"
+      : "Папка вне библиотеки: файл сохранится, но в список не попадёт"
+  );
 }
 
 function renderOnline() {
   const folders = state.folders || [];
-  const options = folders
-    .map((folder) => `<option value="${escapeHtml(folder.path)}">${escapeHtml(folder.path)}</option>`)
-    .join("");
+  const label = state.onlineFolder
+    ? state.onlineFolder.split(/[\\/]/).filter(Boolean).pop() || state.onlineFolder
+    : "выбрать папку";
   el.view.innerHTML = `
     <div class="playlist-toolbar online-toolbar">
       <input class="search online-search" id="online-query" placeholder="Название или исполнитель"
         value="${escapeHtml(state.onlineQuery)}" autocomplete="off">
       <button class="ghost" id="online-go">Найти</button>
-      ${folders.length
-        ? `<select class="sort" id="online-folder" title="Куда скачивать">${options}</select>`
-        : '<span class="hint">Добавьте папку в библиотеку, чтобы было куда скачивать</span>'}
+      <button class="ghost online-folder" id="online-folder" title="${escapeHtml(state.onlineFolder || "Папка для скачивания")}">
+        Куда: ${escapeHtml(label)}
+      </button>
     </div>
     <div class="scroll" id="online-results"></div>`;
   renderOnlineResults();
@@ -1162,10 +1196,9 @@ async function searchOnline() {
 }
 
 async function downloadOnline(songId, button) {
-  const select = document.getElementById("online-folder");
-  const folder = select ? select.value : "";
+  const folder = state.onlineFolder;
   if (!folder) {
-    toast("Сначала добавьте папку в библиотеку");
+    toast("Сначала выберите папку для скачивания");
     return;
   }
   const song = state.onlineResults.find((item) => item.id === songId);
@@ -1205,7 +1238,11 @@ function pollOnline() {
           entry.button.textContent = "Готово";
           entry.button.disabled = true;
           await loadTracks();
-          toast(`Скачано: ${String(job.path).split(/[\\/]/).pop()}`);
+          toast(
+            job.indexed
+              ? `Скачано: ${String(job.path).split(/[\\/]/).pop()}`
+              : `Скачано вне библиотеки: ${String(job.path).split(/[\\/]/).pop()}`
+          );
         } else if (job.status === "error") {
           state.onlineJobs.delete(jobId);
           entry.button.textContent = "Ошибка";
@@ -1868,6 +1905,7 @@ async function loadPreferences() {
     }
     if (prefs["ui.accent"]) state.accent = prefs["ui.accent"];
     if (prefs["ui.base"]) state.base = prefs["ui.base"];
+    if (prefs["ui.downloadFolder"]) state.onlineFolder = prefs["ui.downloadFolder"];
   } catch (error) {
     /* first launch: keep the defaults */
   }
@@ -2018,6 +2056,10 @@ async function findLyrics() {
 el.view.addEventListener("click", async (event) => {
   if (event.target.id === "online-go") {
     await searchOnline();
+    return;
+  }
+  if (event.target.id === "online-folder") {
+    await chooseOnlineFolder();
     return;
   }
   const download = event.target.closest("[data-download]");

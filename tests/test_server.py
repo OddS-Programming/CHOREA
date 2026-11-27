@@ -940,18 +940,60 @@ def test_online_download_job_indexes_the_file(server, monkeypatch) -> None:
     assert library.track_by_path(str(target)) is not None
 
 
-def test_online_download_rejects_a_folder_outside_the_library(server, tmp_path) -> None:
-    running, _library, _track = server
+def test_online_download_outside_the_library_is_not_indexed(server, tmp_path, monkeypatch) -> None:
+    import time
+
+    import helpers
+    from choreia.sources import hitmos
+
+    running, library, _track = server
     outside = tmp_path / "Outside"
     outside.mkdir()
+    data = (helpers.ASSETS / "tone.mp3").read_bytes()
+    monkeypatch.setattr(
+        hitmos, "resolve", lambda song_id: {"download": "https://dwc1/x.mp3", "play": ""}
+    )
+
+    def fake_download(url, target, progress=None):
+        target.write_bytes(data)
+        return len(data)
+
+    monkeypatch.setattr(hitmos, "download", fake_download)
 
     status, payload = _post(
         running,
         "/api/online/download",
         {"id": "1", "folder": str(outside), "title": "T", "artist": "A"},
     )
+    assert status == 200
+    job_id = payload["job"]
 
-    assert status == 403
+    job = None
+    for _ in range(100):
+        _status, _headers, body = _get(
+            running, f"/api/online/progress?id={job_id}", {"X-Token": running.context.token}
+        )
+        job = json.loads(body)["job"]
+        if job["status"] in {"done", "error"}:
+            break
+        time.sleep(0.05)
+
+    assert job is not None and job["status"] == "done"
+    assert job["indexed"] is False
+    assert Path(job["path"]).exists()
+    assert library.track_by_path(job["path"]) is None
+
+
+def test_online_download_needs_an_existing_folder(server, tmp_path) -> None:
+    running, _library, _track = server
+
+    status, _payload = _post(
+        running,
+        "/api/online/download",
+        {"id": "1", "folder": str(tmp_path / "Missing"), "title": "T", "artist": "A"},
+    )
+
+    assert status == 400
 
 
 def test_update_track_metadata(server) -> None:

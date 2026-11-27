@@ -926,6 +926,12 @@ body.np-open .player { visibility: hidden; }
 
 .online-toolbar { gap: 10px; }
 .online-search { width: min(320px, 40vw); }
+.online-folder {
+  max-width: 360px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .online-row {
   display: grid;
   grid-template-columns: 48px minmax(0, 1fr) auto auto;
