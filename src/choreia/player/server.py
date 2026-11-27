@@ -779,6 +779,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             clean_file(source, keep=keep, metadata=metadata)
             updated = refresh_track(library, self.context.thumbs, source)
+            library.clear_lyrics_miss(track_id)
         except Exception as exc:
             self._error(500, f"cannot write: {exc}")
             return
@@ -809,6 +810,11 @@ class Handler(BaseHTTPRequestHandler):
         if track is None:
             self._error(404, "no track")
             return
+        payload = self._read_json()
+        force = bool(payload.get("force"))
+        if not force and library.lyrics_miss(track_id):
+            self._error(404, "lyrics not found")
+            return
         found = lookup(
             str(track["artist"] or ""),
             str(track["title"] or ""),
@@ -816,6 +822,7 @@ class Handler(BaseHTTPRequestHandler):
             float(track["duration"] or 0),
         )
         if not found:
+            library.mark_lyrics_miss(track_id)
             self._error(404, "lyrics not found")
             return
         plain = str(found.get("plain") or "")
@@ -829,6 +836,7 @@ class Handler(BaseHTTPRequestHandler):
             source=str(found.get("source") or "lrclib"),
             instrumental=bool(found.get("instrumental")),
         )
+        library.clear_lyrics_miss(track_id)
         self._json({"lyrics": library.lyrics(track_id)})
 
     def _save_lyrics(self, track_id: int) -> None:

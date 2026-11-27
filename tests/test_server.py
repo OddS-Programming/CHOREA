@@ -792,6 +792,7 @@ def test_album_cover_works_without_album_artist_tag(server) -> None:
 def test_clear_all_lyrics(server) -> None:
     running, library, _track = server
     library.set_lyrics(1, plain="one line", source="manual")
+    library.mark_lyrics_miss(1)
 
     request = urllib.request.Request(
         f"http://127.0.0.1:{running.port}/api/lyrics",
@@ -803,6 +804,7 @@ def test_clear_all_lyrics(server) -> None:
 
     assert payload["removed"] == 1
     assert library.count_lyrics() == 0
+    assert library.lyrics_miss(1) is False
 
 
 def test_fetch_stores_the_provider_source(server, monkeypatch) -> None:
@@ -824,6 +826,28 @@ def test_fetch_stores_the_provider_source(server, monkeypatch) -> None:
 
     assert status == 200
     assert library.lyrics(1)["source"] == "lyrics.ovh"
+
+
+def test_fetch_caches_a_miss_until_forced(server, monkeypatch) -> None:
+    from choreia.sources import lyrics as lyrics_source
+
+    running, library, _track = server
+    calls = {"count": 0}
+
+    def missing(*args, **kwargs):
+        calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(lyrics_source, "lookup", missing)
+
+    assert _post(running, "/api/lyrics/1/fetch", {})[0] == 404
+    assert library.lyrics_miss(1) is True
+
+    assert _post(running, "/api/lyrics/1/fetch", {})[0] == 404
+    assert calls["count"] == 1
+
+    assert _post(running, "/api/lyrics/1/fetch", {"force": True})[0] == 404
+    assert calls["count"] == 2
 
 
 def test_update_track_metadata(server) -> None:

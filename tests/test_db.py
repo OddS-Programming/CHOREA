@@ -315,6 +315,19 @@ def test_clear_lyrics_removes_every_text(tmp_path: Path) -> None:
     library.close()
 
 
+def test_lyrics_miss_round_trip(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    track_id = library.upsert_track(path="C:/m/a.mp3", title="A")
+
+    assert library.lyrics_miss(track_id) is False
+    library.mark_lyrics_miss(track_id)
+    assert library.lyrics_miss(track_id) is True
+    assert library.lyrics_miss(track_id, max_age=0) is False
+    library.clear_lyrics_miss(track_id)
+    assert library.lyrics_miss(track_id) is False
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

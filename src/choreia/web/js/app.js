@@ -1820,7 +1820,7 @@ async function findLyrics() {
   el.lyricsFind.disabled = true;
   el.lyricsFind.textContent = "Ищу…";
   try {
-    const found = await API.post(`lyrics/${trackId}/fetch`, {});
+    const found = await API.post(`lyrics/${trackId}/fetch`, { force: true });
     state.lyrics = found.lyrics;
     state.lyricsSkipped.delete(trackId);
     el.lyricsText.value = found.lyrics.synced || found.lyrics.plain || "";

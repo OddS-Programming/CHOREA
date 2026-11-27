@@ -108,6 +108,11 @@ CREATE TABLE IF NOT EXISTS album_covers (
     cover_hash TEXT NOT NULL,
     updated_at REAL NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS lyrics_misses (
+    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    checked_at REAL NOT NULL
+);
 """
 
 
@@ -514,6 +519,7 @@ class Library:
     def clear_lyrics(self) -> int:
         with self._lock:
             cursor = self._conn.execute("DELETE FROM lyrics")
+            self._conn.execute("DELETE FROM lyrics_misses")
             self._conn.commit()
         return cursor.rowcount
 
@@ -521,6 +527,32 @@ class Library:
         with self._lock:
             row = self._conn.execute("SELECT COUNT(*) AS total FROM lyrics").fetchone()
         return int(row["total"])
+
+    def lyrics_miss(self, track_id: int, max_age: float = 30 * 24 * 3600) -> bool:
+        """True when a recent search already found nothing for this track."""
+        import time
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT checked_at FROM lyrics_misses WHERE track_id=?", (track_id,)
+            ).fetchone()
+        return bool(row) and time.time() - float(row["checked_at"]) < max_age
+
+    def mark_lyrics_miss(self, track_id: int) -> None:
+        import time
+
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO lyrics_misses (track_id, checked_at) VALUES (?, ?) "
+                "ON CONFLICT(track_id) DO UPDATE SET checked_at=excluded.checked_at",
+                (track_id, time.time()),
+            )
+            self._conn.commit()
+
+    def clear_lyrics_miss(self, track_id: int) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM lyrics_misses WHERE track_id=?", (track_id,))
+            self._conn.commit()
 
     # ------------------------------------------------------------- playlists
     def playlists(self) -> list[dict]:
