@@ -1054,11 +1054,20 @@ function switchView(view) {
 
 /* ------------------------------------------------------------------- scan */
 async function addFolder() {
-  const path = await askText(
-    "Добавить папку",
-    state.collection?.path || "C:\\",
-    "Полный путь к папке с музыкой"
-  );
+  const initial = state.collection?.path || state.folders[0]?.path || "";
+  let path = null;
+  try {
+    const picked = await API.post("pick-folder", { initial });
+    if (picked.cancelled) return;
+    path = picked.path;
+  } catch (error) {
+    // No native picker (PowerShell missing or blocked): fall back to typing.
+    path = await askText(
+      "Добавить папку",
+      initial || "C:\\",
+      "Полный путь к папке с музыкой"
+    );
+  }
   if (!path) return;
   try {
     await API.post("folders", { path });
@@ -1302,7 +1311,7 @@ async function openSettings() {
     el.settingVersion.textContent = `χορεία ${data.version}`;
     el.dataHint.textContent = data.data_dir;
     el.lyricsCacheHint.textContent = data.lyrics_cached
-      ? `Хранится текстов: ${data.lyrics_cached}`
+      ? `Хранится текстов: ${data.lyrics_cached} · ${formatBytes(data.lyrics_bytes)}`
       : "Сохранённых текстов нет";
     el.cacheHint.textContent = data.cache_bytes
       ? `Занято ${formatBytes(data.cache_bytes)}`

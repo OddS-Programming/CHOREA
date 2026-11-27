@@ -402,9 +402,19 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/pick-folder":
+            payload = self._read_json()
+            initial = str(payload.get("initial") or "")
             from .dialogs import pick_folder
 
-            self._json({"path": pick_folder()})
+            try:
+                chosen = pick_folder(initial)
+            except Exception as exc:
+                self._error(500, str(exc))
+                return
+            if not chosen:
+                self._json({"cancelled": True})
+                return
+            self._json({"path": chosen})
             return
 
         if path == "/api/pick-files":
@@ -992,6 +1002,7 @@ class Handler(BaseHTTPRequestHandler):
                     "genius_configured": bool(library.setting("genius_token")),
                     "genius_state": self.context.genius_state(),
                     "lyrics_cached": library.count_lyrics(),
+                    "lyrics_bytes": library.lyrics_bytes(),
                 }
             )
             return

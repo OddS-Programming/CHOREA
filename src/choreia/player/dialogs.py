@@ -35,28 +35,66 @@ def recycle(path: Path) -> bool:
     result = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(operation))
     return result == 0
 
-SCRIPT = (
-    "Add-Type -AssemblyName System.Windows.Forms;"
-    "$owner = New-Object System.Windows.Forms.Form;"
-    "$owner.TopMost = $true;"
-    "$owner.ShowInTaskbar = $false;"
-    "$owner.WindowState = 'Minimized';"
-    "$dialog = New-Object System.Windows.Forms.FolderBrowserDialog;"
-    "if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { $dialog.SelectedPath }"
-)
+FOLDER_SCRIPT = """
+Add-Type -AssemblyName System.Windows.Forms
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.WindowState = 'Minimized'
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = 'Выберите папку с музыкой'
+$dialog.UseDescriptionForTitle = $true
+$dialog.ShowNewFolderButton = $true
+if ($env:CHOREIA_INITIAL -and (Test-Path -LiteralPath $env:CHOREIA_INITIAL)) {
+    $dialog.SelectedPath = $env:CHOREIA_INITIAL
+}
+if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
+    [System.IO.File]::WriteAllText($env:CHOREIA_OUT, $dialog.SelectedPath, (New-Object System.Text.UTF8Encoding($false)))
+}
+"""
 
 
-def pick_folder() -> str:
+def pick_folder(initial: str = "") -> str | None:
+    """Show the native Windows folder picker. Returns None when cancelled."""
+    import os
+    import tempfile
+
+    out = Path(tempfile.gettempdir()) / f"choreia-pick-{os.getpid()}.txt"
+    out.unlink(missing_ok=True)
+    env = {**os.environ, "CHOREIA_INITIAL": initial or "", "CHOREIA_OUT": str(out)}
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-STA", "-Command", SCRIPT],
+            [
+                "powershell",
+                "-NoProfile",
+                "-STA",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                FOLDER_SCRIPT,
+            ],
             capture_output=True,
             text=True,
-            timeout=600,
+            timeout=1800,
+            env=env,
+            creationflags=flags,
         )
-    except Exception:
-        return ""
-    return result.stdout.strip()
+    except OSError as exc:
+        raise RuntimeError("PowerShell недоступен") from exc
+    except subprocess.SubprocessError as exc:
+        raise RuntimeError("диалог выбора папки не открылся") from exc
+
+    if result.returncode != 0:
+        message = (result.stderr or "").strip().splitlines()
+        raise RuntimeError(message[-1][:200] if message else "диалог выбора папки не открылся")
+    if not out.exists():
+        return None
+    try:
+        chosen = out.read_text(encoding="utf-8").strip()
+    finally:
+        out.unlink(missing_ok=True)
+    return chosen or None
 
 
 FILES_SCRIPT = (

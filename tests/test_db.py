@@ -328,6 +328,18 @@ def test_lyrics_miss_round_trip(tmp_path: Path) -> None:
     library.close()
 
 
+def test_lyrics_bytes_counts_the_text(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    track_id = library.upsert_track(path="C:/m/a.mp3", title="A")
+    assert library.lyrics_bytes() == 0
+
+    library.set_lyrics(track_id, plain="abcd", synced="[00:01.00] abcd")
+    expected = len("abcd".encode()) + len("[00:01.00] abcd".encode())
+
+    assert library.lyrics_bytes() == expected
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

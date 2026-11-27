@@ -528,6 +528,15 @@ class Library:
             row = self._conn.execute("SELECT COUNT(*) AS total FROM lyrics").fetchone()
         return int(row["total"])
 
+    def lyrics_bytes(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM("
+                "LENGTH(CAST(plain AS BLOB)) + LENGTH(CAST(synced AS BLOB))"
+                "), 0) AS total FROM lyrics"
+            ).fetchone()
+        return int(row["total"])
+
     def lyrics_miss(self, track_id: int, max_age: float = 30 * 24 * 3600) -> bool:
         """True when a recent search already found nothing for this track."""
         import time

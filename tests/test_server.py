@@ -660,6 +660,8 @@ def test_diagnostics_reports_version_and_cache(server) -> None:
     assert payload["cache_bytes"] == 2048
     assert payload["genius_configured"] is False
     assert payload["genius_state"] == "none"
+    assert payload["lyrics_cached"] == 0
+    assert payload["lyrics_bytes"] == 0
     assert Path(payload["data_dir"]) == root.parent.parent
 
 
@@ -848,6 +850,29 @@ def test_fetch_caches_a_miss_until_forced(server, monkeypatch) -> None:
 
     assert _post(running, "/api/lyrics/1/fetch", {"force": True})[0] == 404
     assert calls["count"] == 2
+
+
+def test_pick_folder_endpoint(server, monkeypatch) -> None:
+    from choreia.player import dialogs
+
+    running, _library, _track = server
+    monkeypatch.setattr(dialogs, "pick_folder", lambda initial="": r"C:\Music")
+
+    status, payload = _post(running, "/api/pick-folder", {"initial": "C:\\"})
+    assert status == 200
+    assert payload == {"path": "C:\\Music"}
+
+    monkeypatch.setattr(dialogs, "pick_folder", lambda initial="": None)
+    status, payload = _post(running, "/api/pick-folder", {})
+    assert status == 200
+    assert payload == {"cancelled": True}
+
+    def boom(initial=""):
+        raise RuntimeError("PowerShell недоступен")
+
+    monkeypatch.setattr(dialogs, "pick_folder", boom)
+    status, payload = _post(running, "/api/pick-folder", {})
+    assert status == 500
 
 
 def test_update_track_metadata(server) -> None:
