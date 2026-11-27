@@ -116,16 +116,27 @@
 
 Нужны Windows 10/11 и Microsoft Edge (он есть в системе по умолчанию).
 
-### Готовый exe
+### Одна команда
 
-1. Соберите приложение по инструкции [ниже](#сборка-из-исходников).
-2. Установите ярлыки:
+Откройте PowerShell и выполните:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://github.com/OddS-Programming/CHOREA/releases/latest/download/install.ps1 | iex"
+```
+
+Скрипт сам найдёт последнюю версию, скачает архив, установит приложение в `%LOCALAPPDATA%\Programs\Choreia`, создаст ярлыки «Choreia» на рабочем столе и в меню «Пуск», затем запустит плеер. Повторный запуск обновит установку, данные не пострадают.
+
+### Вручную из архива
+
+1. Скачайте `Choreia-*-win64.zip` со страницы [Releases](https://github.com/OddS-Programming/CHOREA/releases).
+2. Распакуйте в любое место и запустите `Choreia.exe`.
+3. Для ярлыков скачайте репозиторий и выполните:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\install-player.ps1
 ```
 
-Скрипт копирует onedir-сборку в `%LOCALAPPDATA%\Programs\Choreia` и создаёт ярлыки на рабочем столе и в меню «Пуск». Запуск — `Choreia.exe`, поиск в `Win+S` по слову «χορεία».
+Скрипт копирует onedir-сборку в `%LOCALAPPDATA%\Programs\Choreia` и создаёт ярлыки. Поиск в `Win+S` — по слову «Choreia».
 
 ### Из исходников
 
