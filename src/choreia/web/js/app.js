@@ -87,6 +87,12 @@ const el = {
   npLyrics: document.getElementById("np-lyrics"),
   npBody: document.getElementById("np-body"),
   npLyricsToggle: document.getElementById("np-lyrics-toggle"),
+  queueToggle: document.getElementById("queue-toggle"),
+  npQueue: document.getElementById("np-queue"),
+  queuePanel: document.getElementById("queue-panel"),
+  queueList: document.getElementById("queue-list"),
+  queueCount: document.getElementById("queue-count"),
+  queueClose: document.getElementById("queue-close"),
   npLeft: document.querySelector(".np-left"),
   npRight: document.querySelector(".np-right"),
   npLyricsEdit: document.getElementById("np-lyrics-edit"),
@@ -193,6 +199,7 @@ const ICONS = {
   shuffle: '<svg viewBox="0 0 24 24"><path d="M17 3l4 4-4 4V8h-2.2c-1 0-1.6.4-2.3 1.4l-1.1 1.6-1.3-1.8C9.3 8.1 8.4 7.5 7.2 7.5H3v2h4.2c.5 0 .9.2 1.4.8l1.6 2.2-1.7 2.4c-.4.6-.8.8-1.3.8H3v2h4.2c1.2 0 2.1-.6 2.9-1.7l1.3-1.8 1.1 1.6c.7 1 1.3 1.4 2.3 1.4H17v3l4-4-4-4v3h-1.9c-.5 0-.9-.2-1.4-.9l-1.5-2.1 1.6-2.3c.4-.6.8-.8 1.3-.8H17z"/></svg>',
   repeat: '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>',
   "repeat-one": '<svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/><path d="M11 15h1.6v-4H11l-.9.9v.9h.9z"/></svg>',
+  queue: '<svg viewBox="0 0 24 24"><path d="M4 6h11v2H4zm0 5h11v2H4zm0 5h7v2H4zm12-4v7l5-3.5z"/></svg>',
   volume: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z"/></svg>',
   mute: '<svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4zm12.6 3 2.4 2.4-1.4 1.4L15.2 13l-2.4 2.4-1.4-1.4L13.8 12l-2.4-2.4 1.4-1.4L15.2 11l2.4-2.4 1.4 1.4z"/></svg>',
   lyrics: '<svg viewBox="0 0 24 24"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h10v2H4z"/></svg>',
@@ -208,6 +215,7 @@ for (const [id, name] of Object.entries({
   shuffle: "shuffle", prev: "prev", play: "play", next: "next", repeat: "repeat",
   mute: "volume", "np-shuffle": "shuffle", "np-prev": "prev", "np-play": "play",
   "np-next": "next", "np-repeat": "repeat", "np-mute": "volume", "np-lyrics-edit": "lyrics",
+  "queue-toggle": "queue", "np-queue": "queue",
 })) {
   setIcon(document.getElementById(id), name);
 }
@@ -387,6 +395,7 @@ function playTrack(id, record = true) {
   updateNow(track);
   loadLyrics(id);
   updatePlayingMark();
+  scheduleQueueRender();
   if (window.pywebview?.api?.played) window.pywebview.api.played(id).catch(() => {});
 }
 
@@ -567,6 +576,84 @@ function stopSpectrum() {
   spectrumFrame = null;
 }
 
+/* ------------------------------------------------------------------ queue */
+function toggleQueue() {
+  el.queuePanel.hidden = !el.queuePanel.hidden;
+  if (!el.queuePanel.hidden) renderQueue();
+}
+
+function scheduleQueueRender() {
+  if (!el.queuePanel.hidden) renderQueue();
+}
+
+function renderQueue() {
+  const list = el.queueList;
+  if (!list) return;
+  el.queueCount.textContent = `${state.queue.length} треков`;
+  if (!state.queue.length) {
+    list.innerHTML = '<div class="hint">Очередь пуста — включите любой трек.</div>';
+    return;
+  }
+  list.innerHTML = state.queue
+    .map((id, index) => {
+      const track = trackById(id) || { title: `Трек ${id}`, artist: "", cover_hash: "" };
+      const current = id === state.currentId ? " current" : "";
+      return `
+        <div class="queue-row${current}" draggable="true" data-queue-index="${index}" data-queue-id="${id}">
+          <div class="queue-cover">${coverMarkup(track, 64)}</div>
+          <div class="queue-main">
+            <div class="queue-title">${escapeHtml(track.title || "Без названия")}</div>
+            <div class="queue-artist">${escapeHtml(track.artist || "")}</div>
+          </div>
+          <button class="queue-action" data-queue-next="${index}" title="Играть следующим">↓</button>
+          <button class="queue-action queue-remove" data-queue-remove="${index}" title="Убрать из очереди">✕</button>
+        </div>`;
+    })
+    .join("");
+}
+
+function moveQueueItem(from, to) {
+  if (from === to || from < 0 || to < 0) return;
+  if (from >= state.queue.length || to >= state.queue.length) return;
+  const [item] = state.queue.splice(from, 1);
+  state.queue.splice(to, 0, item);
+  if (state.currentId) state.queueIndex = state.queue.indexOf(state.currentId);
+  renderQueue();
+}
+
+function removeQueueItem(index) {
+  if (index < 0 || index >= state.queue.length) return;
+  const removed = state.queue[index];
+  state.queue.splice(index, 1);
+  if (removed === state.currentId) {
+    state.queueIndex = Math.min(index - 1, state.queue.length - 1);
+  } else if (state.currentId) {
+    state.queueIndex = state.queue.indexOf(state.currentId);
+  }
+  renderQueue();
+}
+
+function playQueueNext(index) {
+  if (!state.currentId || index < 0 || index >= state.queue.length) return;
+  const current = state.queue.indexOf(state.currentId);
+  if (current < 0 || index === current) return;
+  const [item] = state.queue.splice(index, 1);
+  const insertAt = index < current ? current : current + 1;
+  state.queue.splice(insertAt, 0, item);
+  state.queueIndex = state.queue.indexOf(state.currentId);
+  renderQueue();
+}
+
+function playQueueItem(index) {
+  const id = state.queue[index];
+  if (id === undefined) return;
+  if (id === state.currentId) {
+    togglePlay();
+    return;
+  }
+  playTrack(id);
+}
+
 /* ------------------------------------------------------------------ views */
 async function renderFolders() {
   try {
@@ -667,6 +754,7 @@ async function openPlaylist(id) {
     state.queue = data.tracks.map((track) => track.id);
     state.queueIndex = -1;
     state.history = [];
+    scheduleQueueRender();
     el.crumbs.textContent = data.playlist.name;
     el.view.innerHTML = `
       <div class="playlist-toolbar">
@@ -2474,6 +2562,45 @@ el.selectionClear.addEventListener("click", () => {
 });
 el.selectionDelete.addEventListener("click", deleteTracksFromSelection);
 
+el.queueToggle.addEventListener("click", toggleQueue);
+el.npQueue.addEventListener("click", toggleQueue);
+el.queueClose.addEventListener("click", toggleQueue);
+el.queueList.addEventListener("click", (event) => {
+  const remove = event.target.closest("[data-queue-remove]");
+  if (remove) {
+    removeQueueItem(Number(remove.dataset.queueRemove));
+    return;
+  }
+  const next = event.target.closest("[data-queue-next]");
+  if (next) {
+    playQueueNext(Number(next.dataset.queueNext));
+    return;
+  }
+  const row = event.target.closest("[data-queue-index]");
+  if (row) playQueueItem(Number(row.dataset.queueIndex));
+});
+let queueDragIndex = null;
+el.queueList.addEventListener("dragstart", (event) => {
+  const row = event.target.closest("[data-queue-index]");
+  if (!row) return;
+  queueDragIndex = Number(row.dataset.queueIndex);
+  row.classList.add("dragging");
+});
+el.queueList.addEventListener("dragend", (event) => {
+  event.target.closest("[data-queue-index]")?.classList.remove("dragging");
+  queueDragIndex = null;
+});
+el.queueList.addEventListener("dragover", (event) => {
+  event.preventDefault();
+});
+el.queueList.addEventListener("drop", (event) => {
+  event.preventDefault();
+  const row = event.target.closest("[data-queue-index]");
+  if (!row || queueDragIndex === null) return;
+  moveQueueItem(queueDragIndex, Number(row.dataset.queueIndex));
+  queueDragIndex = null;
+});
+
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
 el.lyricsText.addEventListener("input", updateLyricsFormat);
 el.uploadFiles.addEventListener("change", async () => {
@@ -2528,6 +2655,7 @@ document.addEventListener("keydown", (event) => {
     else if (!el.coverModal.hidden) closeAlbumCover();
     else if (!el.lyricsModal.hidden) closeLyricsEditor();
     else if (!el.editModal.hidden) closeEditor();
+    else if (!el.queuePanel.hidden) toggleQueue();
     else closeNowPlaying();
   }
   if (event.key === "/") { event.preventDefault(); el.search.focus(); }

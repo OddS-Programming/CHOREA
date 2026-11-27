@@ -83,6 +83,7 @@
       <button class="play-btn" id="play" title="Играть"></button>
       <button class="icon-btn" id="next" title="Следующий"></button>
       <button class="icon-btn" id="repeat" title="Повтор"></button>
+      <button class="icon-btn" id="queue-toggle" title="Очередь"></button>
     </div>
     <div class="seek-row">
       <span class="time" id="elapsed">0:00</span>
@@ -118,6 +119,7 @@
         <button class="icon-btn" id="np-repeat" title="Повтор"></button>
         <button class="icon-btn on" id="np-lyrics-toggle" title="Показать или скрыть текст"></button>
         <button class="icon-btn" id="np-lyrics-edit" title="Текст песни"></button>
+        <button class="icon-btn" id="np-queue" title="Очередь"></button>
       </div>
       <div class="np-seek-row">
         <span class="time" id="np-elapsed">0:00</span>
@@ -134,6 +136,15 @@
       <div class="np-lyrics" id="np-lyrics"></div>
     </div>
   </div>
+</div>
+
+<div class="queue-panel" id="queue-panel" hidden>
+  <div class="queue-head">
+    <div class="modal-title">Очередь</div>
+    <span class="hint" id="queue-count"></span>
+    <button class="icon-btn" id="queue-close" title="Закрыть">✕</button>
+  </div>
+  <div class="queue-list" id="queue-list"></div>
 </div>
 
 <div class="modal" id="edit-modal" hidden>
