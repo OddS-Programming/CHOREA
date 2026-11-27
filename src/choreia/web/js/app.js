@@ -23,6 +23,8 @@ const state = {
   followPauseUntil: 0,
   lyricsVisible: true,
   autoLyrics: true,
+  accent: "green",
+  base: "blue",
   lyricsSkipped: new Set(),
   askResolve: null,
   askMode: "text",
@@ -127,6 +129,8 @@ const el = {
   settingDataOpen: document.getElementById("setting-data-open"),
   settingVersion: document.getElementById("setting-version"),
   settingsDone: document.getElementById("settings-done"),
+  accentChoices: document.getElementById("accent-choices"),
+  baseChoices: document.getElementById("base-choices"),
   coverResults: document.getElementById("cover-results"),
   coverSave: document.getElementById("cover-save"),
   coverCancel: document.getElementById("cover-cancel"),
@@ -532,6 +536,7 @@ function startSpectrum() {
   const canvas = el.spectrum;
   const ctx = canvas.getContext("2d");
   const data = new Uint8Array(analyser.frequencyBinCount);
+  const [accentR, accentG, accentB] = accentRgb();
   const draw = () => {
     analyser.getByteFrequencyData(data);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -540,7 +545,7 @@ function startSpectrum() {
     for (let i = 0; i < bars; i += 1) {
       const value = data[Math.floor((i / bars) * data.length)] / 255;
       const height = Math.max(2, value * canvas.height);
-      ctx.fillStyle = `rgba(34, 197, 94, ${0.25 + value * 0.75})`;
+      ctx.fillStyle = `rgba(${accentR}, ${accentG}, ${accentB}, ${0.25 + value * 0.75})`;
       ctx.fillRect(i * width + 1, canvas.height - height, width - 2, height);
     }
     spectrumFrame = requestAnimationFrame(draw);
@@ -1258,8 +1263,32 @@ function closeEditor() {
 }
 
 /* --------------------------------------------------------------- settings */
+function applyTheme() {
+  const root = document.documentElement;
+  root.dataset.accent = state.accent;
+  root.dataset.base = state.base;
+  el.accentChoices.querySelectorAll("[data-accent]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.accent === state.accent);
+  });
+  el.baseChoices.querySelectorAll("[data-base]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.base === state.base);
+  });
+  if (!el.nowplaying.hidden) startSpectrum();
+}
+
+function accentRgb() {
+  const value = getComputedStyle(document.documentElement)
+    .getPropertyValue("--accent")
+    .trim();
+  const match = /^#([0-9a-f]{6})$/i.exec(value);
+  if (!match) return [34, 197, 94];
+  const number = parseInt(match[1], 16);
+  return [(number >> 16) & 255, (number >> 8) & 255, number & 255];
+}
+
 async function openSettings() {
   el.settingsModal.hidden = false;
+  applyTheme();
   el.settingAutoLyrics.checked = state.autoLyrics;
   el.settingGenius.value = "";
   el.settingVersion.textContent = "";
@@ -1626,9 +1655,12 @@ async function loadPreferences() {
     if (prefs["ui.autoLyrics"] !== undefined) {
       state.autoLyrics = prefs["ui.autoLyrics"] !== "0";
     }
+    if (prefs["ui.accent"]) state.accent = prefs["ui.accent"];
+    if (prefs["ui.base"]) state.base = prefs["ui.base"];
   } catch (error) {
     /* first launch: keep the defaults */
   }
+  applyTheme();
   setIcon(el.npLyricsToggle, state.lyricsVisible ? "eye" : "eye-off");
   applyLyricsVisibility(false);
 }
@@ -2037,6 +2069,20 @@ el.settingsModal.addEventListener("click", (event) => {
   if (event.target === el.settingsModal) closeSettings();
 });
 el.settingAutoLyrics.addEventListener("change", () => setAutoLyrics(el.settingAutoLyrics.checked));
+el.accentChoices.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-accent]");
+  if (!button) return;
+  state.accent = button.dataset.accent;
+  savePreference("ui.accent", state.accent);
+  applyTheme();
+});
+el.baseChoices.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-base]");
+  if (!button) return;
+  state.base = button.dataset.base;
+  savePreference("ui.base", state.base);
+  applyTheme();
+});
 el.settingGeniusSave.addEventListener("click", saveGeniusToken);
 el.settingGenius.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
