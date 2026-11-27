@@ -928,10 +928,15 @@ class Handler(BaseHTTPRequestHandler):
             f'Start-Process "{install_dir / "Choreia.exe"}"\n',
             encoding="utf-8-sig",
         )
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         try:
             subprocess.Popen(
                 [
+                    "cmd",
+                    "/c",
+                    "start",
+                    "",
+                    "/min",
                     "powershell",
                     "-NoProfile",
                     "-ExecutionPolicy",
@@ -948,7 +953,7 @@ class Handler(BaseHTTPRequestHandler):
             self._error(500, f"не удалось запустить обновление: {exc}")
             return
         self._json({"ok": True, "version": tag})
-        threading.Timer(0.6, lambda: os._exit(0)).start()
+        threading.Timer(2.0, lambda: os._exit(0)).start()
 
     def _online_download(self) -> None:
         from pathlib import Path
