@@ -240,7 +240,7 @@ button { font: inherit; color: inherit; }
 
 .list-head, .row {
   display: grid;
-  grid-template-columns: 56px 1fr 220px 70px;
+  grid-template-columns: 56px 1fr 190px 140px;
   align-items: center;
   gap: 14px;
 }
@@ -556,7 +556,7 @@ button { font: inherit; color: inherit; }
   .sidebar-foot .ghost { font-size: 11px; padding: 9px 4px; }
   .search { width: 200px; }
   .list-head span:nth-child(3), .row-album { display: none; }
-  .list-head, .row { grid-template-columns: 56px 1fr 70px; }
+  .list-head, .row { grid-template-columns: 56px 1fr 140px; }
   .topbar { padding: 14px 16px 8px; }
   .view { padding: 4px 16px 16px; }
 }

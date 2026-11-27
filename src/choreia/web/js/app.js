@@ -268,6 +268,7 @@ function rowMarkup(track, selected = false) {
         <button class="row-add" data-add="${track.id}" title="Добавить в плейлист">＋</button>
         <button class="row-edit" data-edit="${track.id}" title="Изменить метаданные">✎</button>
         <span>${formatTime(track.duration)}</span>
+        <button class="row-remove row-track-remove" data-delete="${track.id}" title="Удалить трек в корзину">✕</button>
       </div>
     </div>`;
 }
@@ -901,6 +902,78 @@ function updateSelection() {
   document.querySelectorAll(".row[data-id]").forEach((row) => {
     row.classList.toggle("selected", state.selection.has(Number(row.dataset.id)));
   });
+}
+
+async function deleteTrack(id) {
+  const track = trackById(id);
+  if (!track) return;
+  const agreed = await askConfirm(
+    "Удалить трек?",
+    `«${track.title || track.path}» будет перемещён в корзину Windows и исчезнет из библиотеки.`
+  );
+  if (!agreed) return;
+  try {
+    const result = await API.post("delete-tracks", { ids: [id] });
+    if (!result.removed) {
+      toast("Не удалось удалить: файл вне библиотеки или занят");
+      return;
+    }
+    toast("Трек перемещён в корзину");
+    if (id === state.currentId) stopDeletedTrack();
+    state.selection.delete(id);
+    if (state.view === "folder" && state.collection?.path) {
+      await openFolder(state.collection.path, false);
+    } else if (state.view === "album" && state.collection?.album) {
+      await openAlbum(state.collection.album, state.collection.artist);
+    }
+    await loadTracks();
+  } catch (error) {
+    toast(`Не удалось удалить трек: ${error.message}`);
+  }
+}
+
+function stopDeletedTrack() {
+  el.audio.pause();
+  el.audio.removeAttribute("src");
+  el.audio.load();
+  state.currentId = null;
+  state.history = [];
+  state.lyrics = null;
+  state.lyricLines = [];
+  state.lyricIndex = -1;
+  el.nowTitle.textContent = "Ничего не играет";
+  el.nowArtist.textContent = "";
+  setCover(el.nowCover, { cover_hash: "" }, 320);
+  setCover(el.npCover, { cover_hash: "" }, 640);
+  document.title = "χορεία";
+  closeNowPlaying();
+  syncTransport();
+  renderLyrics();
+}
+
+async function deleteTracksFromSelection() {
+  const ids = [...state.selection];
+  if (!ids.length) return;
+  const agreed = await askConfirm(
+    "Удалить треки?",
+    `Файлы будут перемещены в корзину, записи исчезнут из библиотеки. Выбрано: ${ids.length}.`
+  );
+  if (!agreed) return;
+  try {
+    const result = await API.post("delete-tracks", { ids });
+    toast(`Удалено: ${result.removed}`);
+    if (ids.includes(state.currentId)) stopDeletedTrack();
+    state.selection = new Set();
+    state.lastSelected = null;
+    if (state.view === "folder" && state.collection?.path) {
+      await openFolder(state.collection.path, false);
+    } else if (state.view === "album" && state.collection?.album) {
+      await openAlbum(state.collection.album, state.collection.artist);
+    }
+    await loadTracks();
+  } catch (error) {
+    toast("Не удалось удалить треки");
+  }
 }
 
 async function createFolder() {
@@ -2067,6 +2140,12 @@ el.view.addEventListener("click", async (event) => {
     await downloadOnline(download.dataset.download, download);
     return;
   }
+  const removeTrack = event.target.closest("[data-delete]");
+  if (removeTrack) {
+    event.stopPropagation();
+    await deleteTrack(Number(removeTrack.dataset.delete));
+    return;
+  }
   const add = event.target.closest(".row-add");
   if (add) {
     event.stopPropagation();
@@ -2393,29 +2472,7 @@ el.selectionClear.addEventListener("click", () => {
   state.lastSelected = null;
   updateSelection();
 });
-el.selectionDelete.addEventListener("click", async () => {
-  const ids = [...state.selection];
-  if (!ids.length) return;
-  const agreed = await askConfirm(
-    "Удалить треки?",
-    `Файлы будут перемещены в корзину, записи исчезнут из библиотеки. Выбрано: ${ids.length}.`
-  );
-  if (!agreed) return;
-  try {
-    const result = await API.post("delete-tracks", { ids });
-    toast(`Удалено: ${result.removed}`);
-    state.selection = new Set();
-    state.lastSelected = null;
-    if (state.view === "folder" && state.collection?.path) {
-      await openFolder(state.collection.path, false);
-    } else if (state.view === "album" && state.collection?.album) {
-      await openAlbum(state.collection.album, state.collection.artist);
-    }
-    await loadTracks();
-  } catch (error) {
-    toast("Не удалось удалить треки");
-  }
-});
+el.selectionDelete.addEventListener("click", deleteTracksFromSelection);
 
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
 el.lyricsText.addEventListener("input", updateLyricsFormat);
