@@ -1042,6 +1042,40 @@ body.np-open .queue-panel { bottom: 0; }
 .queue-action:hover { background: var(--surface-3); color: var(--text); }
 .queue-remove:hover { background: var(--danger-soft); color: var(--danger); }
 
+/* -------------------------------------------------------------- duplicates */
+.dup-group {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: var(--surface);
+}
+.dup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.dup-title { font-weight: 600; }
+.dup-artist { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.dup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.dup-path {
+  color: var(--dim);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dup-size { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+
 .theme-choices { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-choice {
   display: inline-flex;

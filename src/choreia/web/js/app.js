@@ -139,6 +139,9 @@ const el = {
   settingCacheClear: document.getElementById("setting-cache-clear"),
   lyricsCacheHint: document.getElementById("lyrics-cache-hint"),
   settingLyricsClear: document.getElementById("setting-lyrics-clear"),
+  backupHint: document.getElementById("backup-hint"),
+  settingBackupClear: document.getElementById("setting-backup-clear"),
+  duplicates: document.getElementById("duplicates"),
   dataHint: document.getElementById("data-hint"),
   settingDataOpen: document.getElementById("setting-data-open"),
   settingVersion: document.getElementById("setting-version"),
@@ -576,6 +579,83 @@ function stopSpectrum() {
   spectrumFrame = null;
 }
 
+/* ------------------------------------------------------------- duplicates */
+async function openDuplicates() {
+  state.view = "duplicates";
+  state.selection = new Set();
+  state.lastSelected = null;
+  el.selectionBar.hidden = true;
+  el.crumbs.textContent = "Дубликаты";
+  el.nav.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
+  el.view.innerHTML = '<div class="empty"><div><h2>Ищу дубликаты…</h2><p>Сравниваю исполнителя, название и длительность.</p></div></div>';
+  try {
+    const data = await API.get("duplicates");
+    state.dupGroups = data.groups || [];
+  } catch (error) {
+    state.dupGroups = [];
+    toast("Не удалось проверить дубликаты");
+  }
+  renderDuplicates();
+}
+
+function renderDuplicates() {
+  const groups = state.dupGroups || [];
+  const parts = [
+    `<div class="playlist-toolbar"><span class="hint">${groups.length} групп</span></div>`,
+    '<div class="scroll">',
+  ];
+  if (!groups.length) {
+    parts.push(
+      '<div class="empty"><div><h2>Дубликатов нет</h2><p>Совпадения ищутся по исполнителю, названию и длительности ±2 секунды.</p></div></div>'
+    );
+  }
+  groups.forEach((group, index) => {
+    const rows = group.tracks
+      .map(
+        (track) => `
+        <div class="dup-row">
+          <div class="dup-path" title="${escapeHtml(track.path)}">${escapeHtml(track.path)}</div>
+          <div class="dup-size">${formatBytes(track.size || 0)}</div>
+          <button class="row-remove" data-delete="${track.id}" title="Удалить в корзину">✕</button>
+        </div>`
+      )
+      .join("");
+    parts.push(`
+      <div class="dup-group">
+        <div class="dup-head">
+          <div>
+            <div class="dup-title">${escapeHtml(group.title || "Без названия")}</div>
+            <div class="dup-artist">${escapeHtml(group.artist || "Неизвестный")} · ${formatTime(group.duration)} · файлов: ${group.tracks.length}</div>
+          </div>
+          <button class="ghost" data-dup-keep="${index}">Оставить первый</button>
+        </div>
+        ${rows}
+      </div>`);
+  });
+  parts.push("</div>");
+  el.view.innerHTML = parts.join("");
+}
+
+async function deleteDuplicateExtras(index) {
+  const group = state.dupGroups[index];
+  if (!group || group.tracks.length < 2) return;
+  const extras = group.tracks.slice(1).map((track) => track.id);
+  const agreed = await askConfirm(
+    "Удалить лишние копии?",
+    `Будет удалено файлов: ${extras.length}. Первый останется. Файлы уйдут в корзину.`
+  );
+  if (!agreed) return;
+  try {
+    const result = await API.post("delete-tracks", { ids: extras });
+    if (extras.includes(state.currentId)) stopDeletedTrack();
+    toast(`Удалено: ${result.removed}`);
+    await openDuplicates();
+    await loadTracks();
+  } catch (error) {
+    toast("Не удалось удалить дубликаты");
+  }
+}
+
 /* ------------------------------------------------------------------ queue */
 function toggleQueue() {
   el.queuePanel.hidden = !el.queuePanel.hidden;
@@ -1009,7 +1089,9 @@ async function deleteTrack(id) {
     toast("Трек перемещён в корзину");
     if (id === state.currentId) stopDeletedTrack();
     state.selection.delete(id);
-    if (state.view === "folder" && state.collection?.path) {
+    if (state.view === "duplicates") {
+      await openDuplicates();
+    } else if (state.view === "folder" && state.collection?.path) {
       await openFolder(state.collection.path, false);
     } else if (state.view === "album" && state.collection?.album) {
       await openAlbum(state.collection.album, state.collection.artist);
@@ -1217,6 +1299,7 @@ function switchView(view) {
   const topSort = document.getElementById("sort");
   if (topSearch) topSearch.hidden = onlineMode;
   if (topSort) topSort.hidden = onlineMode;
+  if (el.duplicates) el.duplicates.hidden = view !== "library";
   if (view === "library") renderLibrary();
   if (view === "albums") renderAlbums();
   if (view === "folders") renderFolders();
@@ -1674,6 +1757,19 @@ async function openSettings() {
   el.geniusHint.textContent = "Проверяю…";
   el.cacheHint.textContent = "…";
   el.lyricsCacheHint.textContent = "…";
+  el.backupHint.textContent = "Считаю…";
+  el.settingBackupClear.disabled = true;
+  API.get("backups")
+    .then((data) => {
+      el.backupHint.textContent = data.count
+        ? `${data.count} файлов · ${formatBytes(data.bytes)}`
+        : "Копий нет";
+      el.settingBackupClear.disabled = !data.count;
+      state.backups = data;
+    })
+    .catch(() => {
+      el.backupHint.textContent = "Не удалось посчитать";
+    });
   try {
     const data = await API.get("diagnostics");
     state.diagnostics = data;
@@ -1721,6 +1817,26 @@ async function saveGeniusToken() {
     toast("Токен не сохранён");
   } finally {
     el.settingGeniusSave.disabled = false;
+  }
+}
+
+async function clearBackups() {
+  const agreed = await askConfirm(
+    "Удалить резервные копии?",
+    "Все файлы .bak в папках библиотеки будут удалены безвозвратно."
+  );
+  if (!agreed) return;
+  el.settingBackupClear.disabled = true;
+  try {
+    const result = await API.del("backups");
+    el.backupHint.textContent = "Копий нет";
+    toast(
+      result.removed
+        ? `Удалено копий: ${result.removed} · ${formatBytes(result.freed)}`
+        : "Копий не было"
+    );
+  } catch (error) {
+    toast("Не удалось удалить копии");
   }
 }
 
@@ -2228,6 +2344,15 @@ el.view.addEventListener("click", async (event) => {
     await downloadOnline(download.dataset.download, download);
     return;
   }
+  const keepDup = event.target.closest("[data-dup-keep]");
+  if (keepDup) {
+    await deleteDuplicateExtras(Number(keepDup.dataset.dupKeep));
+    return;
+  }
+  if (event.target.id === "duplicates") {
+    await openDuplicates();
+    return;
+  }
   const removeTrack = event.target.closest("[data-delete]");
   if (removeTrack) {
     event.stopPropagation();
@@ -2353,6 +2478,7 @@ el.search.addEventListener("input", () => {
   }, 220);
 });
 
+el.duplicates.addEventListener("click", openDuplicates);
 el.sort.addEventListener("change", () => {
   state.sort = el.sort.value;
   loadTracks();
@@ -2602,6 +2728,7 @@ el.queueList.addEventListener("drop", (event) => {
 });
 
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
+el.settingBackupClear.addEventListener("click", clearBackups);
 el.lyricsText.addEventListener("input", updateLyricsFormat);
 el.uploadFiles.addEventListener("change", async () => {
   const files = [...el.uploadFiles.files];

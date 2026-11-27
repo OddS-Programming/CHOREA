@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
 <title>χορεία</title>
 <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
 <link rel="stylesheet" href="/static/css/app.css">
@@ -51,6 +52,7 @@
           <option value="added">По дате добавления</option>
           <option value="played">По прослушиваниям</option>
         </select>
+        <button class="ghost" id="duplicates" title="Найти дубликаты">Дубликаты</button>
       </div>
     </header>
 
@@ -284,6 +286,14 @@
         <small id="lyrics-cache-hint">Хранятся в библиотеке</small>
       </span>
       <button type="button" class="ghost" id="setting-lyrics-clear">Удалить все</button>
+    </div>
+
+    <div class="setting-row">
+      <span>
+        <b>Резервные копии (.bak)</b>
+        <small id="backup-hint">Считаю…</small>
+      </span>
+      <button type="button" class="ghost" id="setting-backup-clear" disabled>Удалить</button>
     </div>
 
     <div class="setting-row">

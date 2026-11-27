@@ -996,6 +996,81 @@ def test_online_download_needs_an_existing_folder(server, tmp_path) -> None:
     assert status == 400
 
 
+def test_backup_files_can_be_counted_and_removed(server) -> None:
+    running, library, track = server
+    root = track.parent
+    library.add_folder(root)
+    (root / "a.mp3.bak").write_bytes(b"x" * 100)
+    (root / "b.mp3.bak").write_bytes(b"y" * 50)
+    keep = root / "notes.txt"
+    keep.write_bytes(b"z")
+
+    _status, _headers, body = _get(running, "/api/backups", {"X-Token": running.context.token})
+    assert json.loads(body) == {"count": 2, "bytes": 150}
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{running.port}/api/backups",
+        method="DELETE",
+        headers={"X-Token": running.context.token},
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        payload = json.loads(response.read())
+
+    assert payload == {"removed": 2, "freed": 150}
+    assert not (root / "a.mp3.bak").exists()
+    assert not (root / "b.mp3.bak").exists()
+    assert keep.exists()
+
+
+def test_duplicate_groups_endpoint(server) -> None:
+    running, library, track = server
+    library.upsert_track(path=str(track), title="Song", artist="A", duration=100)
+    second = track.with_name("second.mp3")
+    library.upsert_track(path=str(second), title="Song", artist="A", duration=101)
+
+    status, _headers, body = _get(
+        running, "/api/duplicates", {"X-Token": running.context.token}
+    )
+
+    assert status == 200
+    groups = json.loads(body)["groups"]
+    assert len(groups) == 1
+    assert len(groups[0]["tracks"]) == 2
+
+
+def test_thumb_requires_a_token(server) -> None:
+    import helpers
+
+    running, _library, _track = server
+    digest, _path = running.context.thumbs.ensure(helpers.jpeg(), 320)
+
+    assert _get(running, f"/thumb/{digest}?size=320")[0] == 403
+    status, _headers, _body = _get(
+        running, f"/thumb/{digest}?size=320", {"X-Token": running.context.token}
+    )
+    assert status == 200
+
+    status, _headers, _body = _get(
+        running, "/thumb/bad..digest?size=320", {"X-Token": running.context.token}
+    )
+    assert status == 400
+
+
+def test_foreign_host_header_is_rejected(server) -> None:
+    running, _library, _track = server
+    connection = http.client.HTTPConnection("127.0.0.1", running.port, timeout=5)
+    connection.request(
+        "GET",
+        "/api/folders",
+        headers={"Host": "evil.example", "X-Token": running.context.token},
+    )
+    response = connection.getresponse()
+    response.read()
+    connection.close()
+
+    assert response.status == 403
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

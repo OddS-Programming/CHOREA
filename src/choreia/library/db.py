@@ -528,6 +528,45 @@ class Library:
             row = self._conn.execute("SELECT COUNT(*) AS total FROM lyrics").fetchone()
         return int(row["total"])
 
+    def duplicate_groups(self, tolerance: float = 2.0) -> list[dict]:
+        """Cluster tracks with the same artist, title and a close duration."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM tracks "
+                "ORDER BY LOWER(title), LOWER(artist), duration, path COLLATE NOCASE"
+            ).fetchall()
+
+        groups: list[dict] = []
+        cluster: list[dict] = []
+
+        def flush() -> None:
+            if len(cluster) > 1:
+                groups.append(
+                    {
+                        "title": cluster[0]["title"],
+                        "artist": cluster[0]["artist"],
+                        "duration": cluster[0]["duration"],
+                        "tracks": list(cluster),
+                    }
+                )
+
+        for row in rows:
+            track = dict(row)
+            if cluster:
+                head = cluster[0]
+                same = (
+                    head["title"].strip().lower() == track["title"].strip().lower()
+                    and head["artist"].strip().lower() == track["artist"].strip().lower()
+                    and abs(float(head["duration"]) - float(track["duration"])) <= tolerance
+                )
+                if same:
+                    cluster.append(track)
+                    continue
+            flush()
+            cluster = [track]
+        flush()
+        return groups
+
     def lyrics_bytes(self) -> int:
         with self._lock:
             row = self._conn.execute(

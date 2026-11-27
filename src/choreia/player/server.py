@@ -232,12 +232,21 @@ class Handler(BaseHTTPRequestHandler):
             token = values[0] if values else None
         return token == self.context.token
 
+    def _host_allowed(self) -> bool:
+        """Reject foreign Host headers so a rebinding domain cannot reach us."""
+        host = (self.headers.get("Host") or "").strip().lower()
+        if not host:
+            return False
+        name = host.rsplit(":", 1)[0] if not host.endswith("]") else host
+        return name in {"127.0.0.1", "localhost", "[::1]", "::1"}
+
     def _json(self, payload: object, status: int = 200) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
@@ -290,6 +299,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(length))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Cache-Control", cache)
+        self.send_header("X-Content-Type-Options", "nosniff")
         if status == HTTPStatus.PARTIAL_CONTENT:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.end_headers()
@@ -311,6 +321,9 @@ class Handler(BaseHTTPRequestHandler):
         self.do_GET()
 
     def do_GET(self) -> None:  # noqa: N802
+        if not self._host_allowed():
+            self._error(403, "bad host")
+            return
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         query = self._query()
@@ -337,7 +350,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path.startswith("/thumb/"):
-            self._serve_thumb(path[len("/thumb/") :], query)
+            if not self._authorised():
+                self._error(403, "token required")
+                return
+            digest = path[len("/thumb/") :]
+            if not re.fullmatch(r"[0-9a-fA-F]{40}", digest):
+                self._error(400, "bad digest")
+                return
+            self._serve_thumb(digest, query)
             return
 
         if path.startswith("/media/"):
@@ -354,6 +374,9 @@ class Handler(BaseHTTPRequestHandler):
         self._error(404, "not found")
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._host_allowed():
+            self._error(403, "bad host")
+            return
         if not self._authorised():
             self._error(403, "token required")
             return
@@ -647,6 +670,9 @@ class Handler(BaseHTTPRequestHandler):
         self._error(404, "not found")
 
     def do_DELETE(self) -> None:  # noqa: N802
+        if not self._host_allowed():
+            self._error(403, "bad host")
+            return
         if not self._authorised():
             self._error(403, "token required")
             return
@@ -671,6 +697,18 @@ class Handler(BaseHTTPRequestHandler):
                         rescanning = True
                         break
             self._json({"ok": True, "removed": removed, "rescanning": rescanning})
+            return
+        if path == "/api/backups":
+            removed = 0
+            freed = 0
+            for item in self._backup_files():
+                try:
+                    freed += item.stat().st_size
+                    item.unlink()
+                    removed += 1
+                except OSError:
+                    continue
+            self._json({"removed": removed, "freed": freed})
             return
         if path == "/api/lyrics":
             removed = self.context.library.clear_lyrics()
@@ -766,6 +804,26 @@ class Handler(BaseHTTPRequestHandler):
         digest = self.context.thumbs.store(picture.data)
         library.set_album_cover(album, digest)
         self._json({"custom": True, "cover_hash": digest})
+
+    def _backup_files(self) -> list[Path]:
+        """Every `.bak` under the library roots, counted once."""
+        seen: set[str] = set()
+        files: list[Path] = []
+        for folder in self.context.library.folders():
+            root = Path(folder["path"])
+            if not root.is_dir():
+                continue
+            try:
+                candidates = root.rglob("*.bak")
+                for item in candidates:
+                    key = str(item).lower()
+                    if key in seen or not item.is_file():
+                        continue
+                    seen.add(key)
+                    files.append(item)
+            except OSError:
+                continue
+        return files
 
     def _online_download(self) -> None:
         from pathlib import Path
@@ -1102,6 +1160,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._json({"job": snapshot})
             return
+        if route == "duplicates":
+            self._json({"groups": library.duplicate_groups()})
+            return
+        if route == "backups":
+            files = self._backup_files()
+            total = 0
+            for item in files:
+                try:
+                    total += item.stat().st_size
+                except OSError:
+                    continue
+            self._json({"count": len(files), "bytes": total})
+            return
         if route == "diagnostics":
             from .. import __version__
 
@@ -1138,7 +1209,11 @@ class Handler(BaseHTTPRequestHandler):
         self._error(404, "unknown api route")
 
     def _serve_thumb(self, digest: str, query: dict[str, list[str]]) -> None:
-        size = int((query.get("size") or ["320"])[0])
+        try:
+            size = int((query.get("size") or ["320"])[0])
+        except ValueError:
+            size = 320
+        size = max(32, min(1024, size))
         path = self.context.thumbs.find(digest, size)
         if path is None:
             self._error(404, "no thumbnail")

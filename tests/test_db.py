@@ -340,6 +340,20 @@ def test_lyrics_bytes_counts_the_text(tmp_path: Path) -> None:
     library.close()
 
 
+def test_duplicate_groups_cluster_by_title_and_duration(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    library.upsert_track(path="C:/m/a.mp3", title="Song", artist="A", duration=100)
+    library.upsert_track(path="C:/m/b.mp3", title="Song", artist="A", duration=101)
+    library.upsert_track(path="C:/m/c.mp3", title="Song", artist="A", duration=140)
+    library.upsert_track(path="C:/m/d.mp3", title="Other", artist="A", duration=100)
+
+    groups = library.duplicate_groups()
+
+    assert len(groups) == 1
+    assert [track["path"] for track in groups[0]["tracks"]] == ["C:/m/a.mp3", "C:/m/b.mp3"]
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"
