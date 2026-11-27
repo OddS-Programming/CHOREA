@@ -127,6 +127,8 @@ class AppContext:
         self._last_prune = 0.0
         self.covers: dict[str, str] = {}
         self.genius_check: tuple[float, str] | None = None
+        self.online_jobs: dict[str, dict] = {}
+        self.online_lock = threading.Lock()
 
     def genius_state(self) -> str:
         token = self.library.setting("genius_token") or ""
@@ -538,6 +540,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"path": str(target), "name": target.name})
             return
 
+        if path == "/api/online/download":
+            self._online_download()
+            return
+
         if path == "/api/add-path":
             from ..library.scanner import AUDIO_SUFFIXES
 
@@ -754,6 +760,86 @@ class Handler(BaseHTTPRequestHandler):
         digest = self.context.thumbs.store(picture.data)
         library.set_album_cover(album, digest)
         self._json({"custom": True, "cover_hash": digest})
+
+    def _online_download(self) -> None:
+        from pathlib import Path
+
+        from ..sources import hitmos
+
+        library = self.context.library
+        payload = self._read_json()
+        song_id = str(payload.get("id") or "").strip()
+        folder_raw = str(payload.get("folder") or "").strip()
+        title = str(payload.get("title") or "").strip()
+        artist = str(payload.get("artist") or "").strip()
+        cover_url = str(payload.get("cover") or "").strip()
+        if not song_id or not folder_raw:
+            self._error(400, "id and folder are required")
+            return
+
+        folder = Path(folder_raw)
+        key = os.path.normpath(str(folder)).lower()
+        roots = [os.path.normpath(item["path"]).lower() for item in library.folders()]
+        inside = any(key == root or key.startswith(root + "\\") for root in roots)
+        if not folder.is_dir() or not inside:
+            self._error(403, "folder must be inside a library root")
+            return
+
+        job = secrets.token_urlsafe(6)
+        state = {
+            "status": "resolving",
+            "received": 0,
+            "total": 0,
+            "path": "",
+            "error": "",
+            "title": title,
+            "artist": artist,
+        }
+        with self.context.online_lock:
+            if len(self.context.online_jobs) > 50:
+                self.context.online_jobs.clear()
+            self.context.online_jobs[job] = state
+
+        def progress(received: int, total: int) -> None:
+            with self.context.online_lock:
+                state["received"] = received
+                if total:
+                    state["total"] = total
+                state["status"] = "downloading"
+
+        def work() -> None:
+            temporary = None
+            try:
+                info = hitmos.resolve(song_id)
+                target = hitmos.unique_path(folder, hitmos.safe_filename(artist, title))
+                temporary = target.with_name(target.name + ".part")
+                hitmos.download(info["download"], temporary, progress)
+                os.replace(temporary, target)
+                if cover_url:
+                    try:
+                        picture = make_picture(
+                            0, hitmos.fetch_image(cover_url), type=3, desc="Cover", source="hitmos"
+                        )
+                        report = inspect_file(target)
+                        clean_file(target, keep=picture, metadata=report.fields, backup=False)
+                    except Exception:
+                        pass
+                refresh_track(library, self.context.thumbs, target)
+                with self.context.online_lock:
+                    state["status"] = "done"
+                    state["path"] = str(target)
+            except Exception as exc:
+                if temporary is not None:
+                    try:
+                        temporary.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                with self.context.online_lock:
+                    state["status"] = "error"
+                    state["error"] = str(exc)
+
+        threading.Thread(target=work, name="choreia-download", daemon=True).start()
+        self._json({"job": job})
 
     def _update_track(self, track_id: int) -> None:
         from pathlib import Path
@@ -982,6 +1068,30 @@ class Handler(BaseHTTPRequestHandler):
             return
         if route == "scan/status":
             self._json(self.context.scan.snapshot())
+            return
+        if route == "online/search":
+            from ..sources import hitmos
+
+            text = (query.get("q") or [""])[0].strip()
+            if not text:
+                self._json({"results": []})
+                return
+            try:
+                found = hitmos.search(text)
+            except Exception as exc:
+                self._error(502, f"поиск недоступен: {exc}")
+                return
+            self._json({"results": found})
+            return
+        if route == "online/progress":
+            job_id = (query.get("id") or [""])[0]
+            with self.context.online_lock:
+                state = self.context.online_jobs.get(job_id)
+                snapshot = dict(state) if state else None
+            if snapshot is None:
+                self._error(404, "no job")
+                return
+            self._json({"job": snapshot})
             return
         if route == "diagnostics":
             from .. import __version__

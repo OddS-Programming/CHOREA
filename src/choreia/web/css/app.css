@@ -924,6 +924,37 @@ body.np-open .player { visibility: hidden; }
 .settings-input:focus { border-color: var(--accent); }
 .settings-version { margin-right: auto; align-self: center; color: var(--dim); font-size: 12px; }
 
+.online-toolbar { gap: 10px; }
+.online-search { width: min(320px, 40vw); }
+.online-row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 10px;
+  transition: background 140ms ease;
+}
+.online-row:hover { background: var(--surface-2); }
+.online-cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--surface-3);
+  display: block;
+}
+.online-main { min-width: 0; }
+.online-title {
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.online-artist { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.online-duration { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+.online-download { min-width: 86px; }
+
 .theme-choices { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-choice {
   display: inline-flex;

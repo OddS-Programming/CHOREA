@@ -25,6 +25,11 @@ const state = {
   autoLyrics: true,
   accent: "green",
   base: "blue",
+  onlineResults: [],
+  onlineQuery: "",
+  onlineSearched: false,
+  onlineJobs: new Map(),
+  onlineTimer: null,
   lyricsSkipped: new Set(),
   askResolve: null,
   askMode: "text",
@@ -1045,11 +1050,177 @@ function switchView(view) {
   });
   const titles = { library: "Библиотека", albums: "Альбомы", folders: "Папки", playlists: "Плейлисты", online: "Интернет" };
   el.crumbs.textContent = titles[view] || "";
+  const onlineMode = view === "online";
+  const topSearch = document.getElementById("search");
+  const topSort = document.getElementById("sort");
+  if (topSearch) topSearch.hidden = onlineMode;
+  if (topSort) topSort.hidden = onlineMode;
   if (view === "library") renderLibrary();
   if (view === "albums") renderAlbums();
   if (view === "folders") renderFolders();
   if (view === "playlists") renderPlaylists();
-  if (view === "online") renderPlaceholder("Интернет", "Поиск и скачивание с hitmos.fm появятся на этапе 5.");
+  if (view === "online") openOnline();
+}
+
+/* ---------------------------------------------------------------- online */
+async function openOnline() {
+  try {
+    state.folders = (await API.get("folders")).folders;
+  } catch (error) {
+    /* keep the folders we already know */
+  }
+  renderOnline();
+}
+
+function renderOnline() {
+  const folders = state.folders || [];
+  const options = folders
+    .map((folder) => `<option value="${escapeHtml(folder.path)}">${escapeHtml(folder.path)}</option>`)
+    .join("");
+  el.view.innerHTML = `
+    <div class="playlist-toolbar online-toolbar">
+      <input class="search online-search" id="online-query" placeholder="Название или исполнитель"
+        value="${escapeHtml(state.onlineQuery)}" autocomplete="off">
+      <button class="ghost" id="online-go">Найти</button>
+      ${folders.length
+        ? `<select class="sort" id="online-folder" title="Куда скачивать">${options}</select>`
+        : '<span class="hint">Добавьте папку в библиотеку, чтобы было куда скачивать</span>'}
+    </div>
+    <div class="scroll" id="online-results"></div>`;
+  renderOnlineResults();
+  const input = document.getElementById("online-query");
+  if (input) {
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchOnline();
+      }
+    });
+    if (!state.onlineSearched) input.focus();
+  }
+}
+
+function onlineRow(item) {
+  return `
+    <div class="online-row">
+      ${item.cover
+        ? `<img class="online-cover" src="${escapeHtml(item.cover)}" alt="" loading="lazy">`
+        : '<div class="online-cover"></div>'}
+      <div class="online-main">
+        <div class="online-title">${escapeHtml(item.title || "Без названия")}</div>
+        <div class="online-artist">${escapeHtml(item.artist || "Неизвестный исполнитель")}</div>
+      </div>
+      <div class="online-duration">${escapeHtml(item.duration || "")}</div>
+      <button class="ghost online-download" data-download="${escapeHtml(item.id)}">Скачать</button>
+    </div>`;
+}
+
+function renderOnlineResults() {
+  const box = document.getElementById("online-results");
+  if (!box) return;
+  if (!state.onlineSearched) {
+    box.innerHTML = `
+      <div class="empty"><div>
+        <h2>Поиск музыки</h2>
+        <p>Введите название или исполнителя — результаты придут с hitmos.fm.</p>
+      </div></div>`;
+    return;
+  }
+  if (!state.onlineResults.length) {
+    box.innerHTML = `
+      <div class="empty"><div>
+        <h2>Ничего не найдено</h2>
+        <p>Попробуйте другой запрос.</p>
+      </div></div>`;
+    return;
+  }
+  box.innerHTML = state.onlineResults.map(onlineRow).join("");
+}
+
+async function searchOnline() {
+  const input = document.getElementById("online-query");
+  const query = input ? input.value.trim() : "";
+  if (!query) return;
+  state.onlineQuery = query;
+  state.onlineSearched = true;
+  const box = document.getElementById("online-results");
+  if (box) {
+    box.innerHTML = `
+      <div class="empty"><div>
+        <h2>Ищу…</h2>
+        <p>Запрашиваю hitmos.fm.</p>
+      </div></div>`;
+  }
+  try {
+    const data = await API.get("online/search", { q: query });
+    state.onlineResults = data.results || [];
+  } catch (error) {
+    state.onlineResults = [];
+    toast(`Поиск недоступен: ${error.message}`);
+  }
+  renderOnlineResults();
+}
+
+async function downloadOnline(songId, button) {
+  const select = document.getElementById("online-folder");
+  const folder = select ? select.value : "";
+  if (!folder) {
+    toast("Сначала добавьте папку в библиотеку");
+    return;
+  }
+  const song = state.onlineResults.find((item) => item.id === songId);
+  button.disabled = true;
+  button.textContent = "0%";
+  try {
+    const data = await API.post("online/download", {
+      id: songId,
+      folder,
+      title: song ? song.title : "",
+      artist: song ? song.artist : "",
+      cover: song ? song.cover : "",
+    });
+    state.onlineJobs.set(data.job, { button });
+    pollOnline();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Скачать";
+    toast(`Не удалось начать загрузку: ${error.message}`);
+  }
+}
+
+function pollOnline() {
+  if (state.onlineTimer) return;
+  state.onlineTimer = setInterval(async () => {
+    if (!state.onlineJobs.size) {
+      clearInterval(state.onlineTimer);
+      state.onlineTimer = null;
+      return;
+    }
+    for (const [jobId, entry] of [...state.onlineJobs]) {
+      try {
+        const data = await API.get("online/progress", { id: jobId });
+        const job = data.job;
+        if (job.status === "done") {
+          state.onlineJobs.delete(jobId);
+          entry.button.textContent = "Готово";
+          entry.button.disabled = true;
+          await loadTracks();
+          toast(`Скачано: ${String(job.path).split(/[\\/]/).pop()}`);
+        } else if (job.status === "error") {
+          state.onlineJobs.delete(jobId);
+          entry.button.textContent = "Ошибка";
+          entry.button.disabled = false;
+          toast(`Не удалось скачать: ${job.error}`);
+        } else if (job.total) {
+          entry.button.textContent = `${Math.round((job.received / job.total) * 100)}%`;
+        } else {
+          entry.button.textContent = "…";
+        }
+      } catch (error) {
+        /* a transient status error must not stop polling */
+      }
+    }
+  }, 700);
 }
 
 /* ------------------------------------------------------------------- scan */
@@ -1845,6 +2016,15 @@ async function findLyrics() {
 
 /* ---------------------------------------------------------------- wiring */
 el.view.addEventListener("click", async (event) => {
+  if (event.target.id === "online-go") {
+    await searchOnline();
+    return;
+  }
+  const download = event.target.closest("[data-download]");
+  if (download) {
+    await downloadOnline(download.dataset.download, download);
+    return;
+  }
   const add = event.target.closest(".row-add");
   if (add) {
     event.stopPropagation();

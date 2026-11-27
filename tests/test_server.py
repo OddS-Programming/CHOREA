@@ -875,6 +875,85 @@ def test_pick_folder_endpoint(server, monkeypatch) -> None:
     assert status == 500
 
 
+def test_online_search_endpoint(server, monkeypatch) -> None:
+    from choreia.sources import hitmos
+
+    running, _library, _track = server
+    monkeypatch.setattr(
+        hitmos,
+        "search",
+        lambda query, limit=20: [{"id": "1", "title": query, "artist": "A", "duration": "1:00", "cover": ""}],
+    )
+
+    status, _headers, body = _get(
+        running, "/api/online/search?q=creep", {"X-Token": running.context.token}
+    )
+
+    assert status == 200
+    assert json.loads(body)["results"][0]["title"] == "creep"
+
+
+def test_online_download_job_indexes_the_file(server, monkeypatch) -> None:
+    import time
+
+    import helpers
+    from choreia.sources import hitmos
+
+    running, library, track = server
+    library.add_folder(track.parent)
+    data = (helpers.ASSETS / "tone.mp3").read_bytes()
+
+    monkeypatch.setattr(
+        hitmos, "resolve", lambda song_id: {"download": "https://dwc1/x.mp3", "play": ""}
+    )
+
+    def fake_download(url, target, progress=None):
+        target.write_bytes(data)
+        if progress:
+            progress(len(data), len(data))
+        return len(data)
+
+    monkeypatch.setattr(hitmos, "download", fake_download)
+
+    status, payload = _post(
+        running,
+        "/api/online/download",
+        {"id": "1", "folder": str(track.parent), "title": "New Track", "artist": "Artist"},
+    )
+    assert status == 200
+    job_id = payload["job"]
+
+    job = None
+    for _ in range(100):
+        _status, _headers, body = _get(
+            running, f"/api/online/progress?id={job_id}", {"X-Token": running.context.token}
+        )
+        job = json.loads(body)["job"]
+        if job["status"] in {"done", "error"}:
+            break
+        time.sleep(0.05)
+
+    assert job is not None and job["status"] == "done"
+    target = Path(job["path"])
+    assert target.name == "Artist - New Track.mp3"
+    assert target.exists()
+    assert library.track_by_path(str(target)) is not None
+
+
+def test_online_download_rejects_a_folder_outside_the_library(server, tmp_path) -> None:
+    running, _library, _track = server
+    outside = tmp_path / "Outside"
+    outside.mkdir()
+
+    status, payload = _post(
+        running,
+        "/api/online/download",
+        {"id": "1", "folder": str(outside), "title": "T", "artist": "A"},
+    )
+
+    assert status == 403
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 
