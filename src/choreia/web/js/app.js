@@ -125,6 +125,8 @@ const el = {
   geniusHint: document.getElementById("genius-hint"),
   cacheHint: document.getElementById("cache-hint"),
   settingCacheClear: document.getElementById("setting-cache-clear"),
+  lyricsCacheHint: document.getElementById("lyrics-cache-hint"),
+  settingLyricsClear: document.getElementById("setting-lyrics-clear"),
   dataHint: document.getElementById("data-hint"),
   settingDataOpen: document.getElementById("setting-data-open"),
   settingVersion: document.getElementById("setting-version"),
@@ -152,7 +154,6 @@ const el = {
   uploadFiles: document.getElementById("upload-files"),
   spectrum: document.getElementById("spectrum"),
   toast: document.getElementById("toast"),
-  addFolder: document.getElementById("add-folder"),
   scanHint: document.getElementById("scan-hint"),
 };
 
@@ -567,7 +568,7 @@ async function renderFolders() {
   } catch (error) {
     state.folders = [];
   }
-  const toolbar = '<div class="playlist-toolbar"></div>';
+  const toolbar = '<div class="playlist-toolbar"><button class="ghost" id="folders-add">＋ Добавить папку</button></div>';
   if (!state.folders.length) {
     el.view.innerHTML = `${toolbar}
       <div class="empty"><div>
@@ -1294,11 +1295,15 @@ async function openSettings() {
   el.settingVersion.textContent = "";
   el.geniusHint.textContent = "Проверяю…";
   el.cacheHint.textContent = "…";
+  el.lyricsCacheHint.textContent = "…";
   try {
     const data = await API.get("diagnostics");
     state.diagnostics = data;
     el.settingVersion.textContent = `χορεία ${data.version}`;
     el.dataHint.textContent = data.data_dir;
+    el.lyricsCacheHint.textContent = data.lyrics_cached
+      ? `Хранится текстов: ${data.lyrics_cached}`
+      : "Сохранённых текстов нет";
     el.cacheHint.textContent = data.cache_bytes
       ? `Занято ${formatBytes(data.cache_bytes)}`
       : "Кэш пуст";
@@ -1338,6 +1343,32 @@ async function saveGeniusToken() {
     toast("Токен не сохранён");
   } finally {
     el.settingGeniusSave.disabled = false;
+  }
+}
+
+async function clearLyricsCache() {
+  const agreed = await askConfirm(
+    "Удалить все тексты?",
+    "Сохранённые и найденные тексты будут удалены. При включённом автопоиске они снова найдутся при воспроизведении."
+  );
+  if (!agreed) return;
+  el.settingLyricsClear.disabled = true;
+  try {
+    const result = await API.del("lyrics");
+    state.lyricsSkipped.clear();
+    el.lyricsCacheHint.textContent = "Сохранённых текстов нет";
+    toast(result.removed ? `Удалено текстов: ${result.removed}` : "Сохранённых текстов не было");
+    if (state.currentId) {
+      // Do not fetch again right now: the next play will search when enabled.
+      state.lyrics = null;
+      state.lyricLines = [];
+      state.lyricIndex = -1;
+      renderLyrics();
+    }
+  } catch (error) {
+    toast("Не удалось очистить тексты");
+  } finally {
+    el.settingLyricsClear.disabled = false;
   }
 }
 
@@ -1845,6 +1876,10 @@ el.view.addEventListener("click", async (event) => {
     await createFolder();
     return;
   }
+  if (event.target.id === "folders-add") {
+    await addFolder();
+    return;
+  }
   if (event.target.id === "folder-upload") {
     await uploadTracks();
     return;
@@ -2091,6 +2126,7 @@ el.settingGenius.addEventListener("keydown", (event) => {
   }
 });
 el.settingCacheClear.addEventListener("click", clearThumbCache);
+el.settingLyricsClear.addEventListener("click", clearLyricsCache);
 el.settingDataOpen.addEventListener("click", openDataFolder);
 el.editModal.addEventListener("click", (event) => {
   if (event.target === el.editModal) closeEditor();
@@ -2216,7 +2252,6 @@ if ("mediaSession" in navigator) {
   navigator.mediaSession.setActionHandler("previoustrack", () => nextTrack(-1));
 }
 
-el.addFolder.addEventListener("click", addFolder);
 el.audio.volume = 0.8;
 
 loadTracks();

@@ -789,6 +789,43 @@ def test_album_cover_works_without_album_artist_tag(server) -> None:
     assert library.album_cover("DEMOVERSION") == payload["cover_hash"]
 
 
+def test_clear_all_lyrics(server) -> None:
+    running, library, _track = server
+    library.set_lyrics(1, plain="one line", source="manual")
+
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{running.port}/api/lyrics",
+        method="DELETE",
+        headers={"X-Token": running.context.token},
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        payload = json.loads(response.read())
+
+    assert payload["removed"] == 1
+    assert library.count_lyrics() == 0
+
+
+def test_fetch_stores_the_provider_source(server, monkeypatch) -> None:
+    from choreia.sources import lyrics as lyrics_source
+
+    running, library, _track = server
+    monkeypatch.setattr(
+        lyrics_source,
+        "lookup",
+        lambda *args, **kwargs: {
+            "source": "lyrics.ovh",
+            "plain": "plain text",
+            "synced": None,
+            "instrumental": False,
+        },
+    )
+
+    status, payload = _post(running, "/api/lyrics/1/fetch", {})
+
+    assert status == 200
+    assert library.lyrics(1)["source"] == "lyrics.ovh"
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

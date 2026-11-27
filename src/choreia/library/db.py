@@ -511,6 +511,17 @@ class Library:
             self._conn.execute("DELETE FROM lyrics WHERE track_id=?", (track_id,))
             self._conn.commit()
 
+    def clear_lyrics(self) -> int:
+        with self._lock:
+            cursor = self._conn.execute("DELETE FROM lyrics")
+            self._conn.commit()
+        return cursor.rowcount
+
+    def count_lyrics(self) -> int:
+        with self._lock:
+            row = self._conn.execute("SELECT COUNT(*) AS total FROM lyrics").fetchone()
+        return int(row["total"])
+
     # ------------------------------------------------------------- playlists
     def playlists(self) -> list[dict]:
         with self._lock:

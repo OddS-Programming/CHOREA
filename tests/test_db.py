@@ -301,6 +301,20 @@ def test_album_cover_override_wins_over_file_art(tmp_path: Path) -> None:
     library.close()
 
 
+def test_clear_lyrics_removes_every_text(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    first = library.upsert_track(path="C:/m/a.mp3", title="A")
+    second = library.upsert_track(path="C:/m/b.mp3", title="B")
+    library.set_lyrics(first, plain="one", source="lrclib")
+    library.set_lyrics(second, plain="two", source="manual")
+
+    assert library.count_lyrics() == 2
+    assert library.clear_lyrics() == 2
+    assert library.count_lyrics() == 0
+    assert library.lyrics(first) is None
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

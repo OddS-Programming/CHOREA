@@ -650,6 +650,10 @@ class Handler(BaseHTTPRequestHandler):
                         break
             self._json({"ok": True, "removed": removed, "rescanning": rescanning})
             return
+        if path == "/api/lyrics":
+            removed = self.context.library.clear_lyrics()
+            self._json({"removed": removed})
+            return
         lyrics_match = re.match(r"^/api/lyrics/(\d+)$", path)
         if lyrics_match:
             self.context.library.delete_lyrics(int(lyrics_match.group(1)))
@@ -822,7 +826,7 @@ class Handler(BaseHTTPRequestHandler):
             track_id,
             plain=plain,
             synced=synced,
-            source="lrclib",
+            source=str(found.get("source") or "lrclib"),
             instrumental=bool(found.get("instrumental")),
         )
         self._json({"lyrics": library.lyrics(track_id)})
@@ -979,6 +983,7 @@ class Handler(BaseHTTPRequestHandler):
                     "cache_bytes": cache_bytes,
                     "genius_configured": bool(library.setting("genius_token")),
                     "genius_state": self.context.genius_state(),
+                    "lyrics_cached": library.count_lyrics(),
                 }
             )
             return
