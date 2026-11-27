@@ -354,6 +354,22 @@ def test_duplicate_groups_cluster_by_title_and_duration(tmp_path: Path) -> None:
     library.close()
 
 
+def test_reorder_playlist_moves_a_row(tmp_path: Path) -> None:
+    library = _library(tmp_path)
+    first = library.upsert_track(path="C:/m/a.mp3", title="A")
+    second = library.upsert_track(path="C:/m/b.mp3", title="B")
+    third = library.upsert_track(path="C:/m/c.mp3", title="C")
+    playlist = library.create_playlist("List")
+    for track_id in (first, second, third):
+        library.add_to_playlist(playlist, track_id)
+
+    assert library.reorder_playlist(playlist, 0, 2) is True
+    assert [track["title"] for track in library.playlist_tracks(playlist)] == ["B", "C", "A"]
+    assert library.reorder_playlist(playlist, 9, 0) is False
+    assert library.reorder_playlist(playlist, 1, 1) is False
+    library.close()
+
+
 def test_prune_missing_drops_deleted_files(tmp_path: Path) -> None:
     library = _library(tmp_path)
     gone = tmp_path / "gone.mp3"

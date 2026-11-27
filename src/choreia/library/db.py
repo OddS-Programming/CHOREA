@@ -668,6 +668,26 @@ class Library:
             )
             self._conn.commit()
 
+    def reorder_playlist(self, playlist_id: int, source: int, target: int) -> bool:
+        """Move one playlist row to another index, renumbering positions."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT track_id FROM playlist_tracks WHERE playlist_id=? ORDER BY position",
+                (playlist_id,),
+            ).fetchall()
+            items = [int(row["track_id"]) for row in rows]
+            if source == target or source < 0 or target < 0 or source >= len(items) or target >= len(items):
+                return False
+            item = items.pop(source)
+            items.insert(target, item)
+            self._conn.execute("DELETE FROM playlist_tracks WHERE playlist_id=?", (playlist_id,))
+            self._conn.executemany(
+                "INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)",
+                [(playlist_id, track_id, index) for index, track_id in enumerate(items)],
+            )
+            self._conn.commit()
+        return True
+
     # -------------------------------------------------------------- settings
     def setting(self, key: str, default: str | None = None) -> str | None:
         with self._lock:

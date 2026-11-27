@@ -1071,6 +1071,24 @@ def test_foreign_host_header_is_rejected(server) -> None:
     assert response.status == 403
 
 
+def test_move_a_playlist_track(server) -> None:
+    running, library, track = server
+    second = library.upsert_track(
+        path=str(track.with_name("second.mp3")), title="Second", artist="Artist", duration=1.0
+    )
+    playlist = library.create_playlist("Order")
+    library.add_to_playlist(playlist, 1)
+    library.add_to_playlist(playlist, second)
+
+    status, payload = _post(
+        running, f"/api/playlists/{playlist}/move", {"from": 0, "to": 1}
+    )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert [item["id"] for item in library.playlist_tracks(playlist)] == [second, 1]
+
+
 def test_update_track_metadata(server) -> None:
     from choreia.core import inspect_file
 

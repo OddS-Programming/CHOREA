@@ -142,6 +142,7 @@ const el = {
   backupHint: document.getElementById("backup-hint"),
   settingBackupClear: document.getElementById("setting-backup-clear"),
   duplicates: document.getElementById("duplicates"),
+  dropOverlay: document.getElementById("drop-overlay"),
   dataHint: document.getElementById("data-hint"),
   settingDataOpen: document.getElementById("setting-data-open"),
   settingVersion: document.getElementById("setting-version"),
@@ -264,11 +265,11 @@ function toast(message) {
 }
 
 /* ------------------------------------------------------------------- list */
-function rowMarkup(track, selected = false) {
+function rowMarkup(track, selected = false, attrs = "") {
   const playing = track.id === state.currentId ? " playing" : "";
   const chosen = selected ? " selected" : "";
   return `
-    <div class="row${playing}${chosen}" data-id="${track.id}">
+    <div class="row${playing}${chosen}" data-id="${track.id}" ${attrs}>
       <div class="row-cover">${coverMarkup(track)}</div>
       <div class="row-main">
         <div class="row-title">${escapeHtml(track.title || "Без названия")}</div>
@@ -347,6 +348,15 @@ async function loadTracks() {
     state.tracks = payload.tracks;
     state.total = payload.total;
     state.loading = false;
+    if (state.queue.length) {
+      const known = new Set(state.tracks.map((track) => track.id));
+      const filtered = state.queue.filter((id) => known.has(id));
+      if (filtered.length !== state.queue.length) {
+        state.queue = filtered;
+        if (state.currentId) state.queueIndex = state.queue.indexOf(state.currentId);
+        scheduleQueueRender();
+      }
+    }
     if (state.view === "library") renderLibrary();
     updatePlayingMark();
   } catch (error) {
@@ -399,6 +409,7 @@ function playTrack(id, record = true) {
   loadLyrics(id);
   updatePlayingMark();
   scheduleQueueRender();
+  persistQueue();
   if (window.pywebview?.api?.played) window.pywebview.api.played(id).catch(() => {});
 }
 
@@ -692,6 +703,15 @@ function renderQueue() {
     .join("");
 }
 
+let queueSaveTimer = null;
+
+function persistQueue() {
+  clearTimeout(queueSaveTimer);
+  queueSaveTimer = setTimeout(() => {
+    savePreference("ui.queue", JSON.stringify(state.queue.slice(0, 2000)));
+  }, 700);
+}
+
 function moveQueueItem(from, to) {
   if (from === to || from < 0 || to < 0) return;
   if (from >= state.queue.length || to >= state.queue.length) return;
@@ -699,6 +719,7 @@ function moveQueueItem(from, to) {
   state.queue.splice(to, 0, item);
   if (state.currentId) state.queueIndex = state.queue.indexOf(state.currentId);
   renderQueue();
+  persistQueue();
 }
 
 function removeQueueItem(index) {
@@ -711,6 +732,7 @@ function removeQueueItem(index) {
     state.queueIndex = state.queue.indexOf(state.currentId);
   }
   renderQueue();
+  persistQueue();
 }
 
 function playQueueNext(index) {
@@ -722,6 +744,7 @@ function playQueueNext(index) {
   state.queue.splice(insertAt, 0, item);
   state.queueIndex = state.queue.indexOf(state.currentId);
   renderQueue();
+  persistQueue();
 }
 
 function playQueueItem(index) {
@@ -831,10 +854,12 @@ async function openPlaylist(id) {
   try {
     const data = await API.get(`playlists/${id}`);
     state.playlist = data;
+    state.view = "playlist";
     state.queue = data.tracks.map((track) => track.id);
     state.queueIndex = -1;
     state.history = [];
     scheduleQueueRender();
+    persistQueue();
     el.crumbs.textContent = data.playlist.name;
     el.view.innerHTML = `
       <div class="playlist-toolbar">
@@ -843,7 +868,7 @@ async function openPlaylist(id) {
         <button class="ghost danger" id="playlist-delete">Удалить</button>
       </div>
       <div class="scroll">${data.tracks.length
-        ? data.tracks.map((track) => rowMarkup(track, false)).join("")
+        ? data.tracks.map((track, index) => rowMarkup(track, false, `draggable="true" data-playlist-index="${index}"`)).join("")
         : '<div class="empty"><div><h2>Пусто</h2><p>Добавьте треки кнопкой ＋ в библиотеке.</p></div></div>'}</div>`;
   } catch (error) {
     toast(`Не удалось открыть плейлист: ${error.message}`);
@@ -1091,6 +1116,8 @@ async function deleteTrack(id) {
     state.selection.delete(id);
     if (state.view === "duplicates") {
       await openDuplicates();
+    } else if (state.view === "playlist" && state.playlist) {
+      await openPlaylist(state.playlist.playlist.id);
     } else if (state.view === "folder" && state.collection?.path) {
       await openFolder(state.collection.path, false);
     } else if (state.view === "album" && state.collection?.album) {
@@ -1175,14 +1202,14 @@ async function uploadTracks() {
   el.uploadFiles.click();
 }
 
-async function handleUpload(files) {
-  if (!files.length || !state.collection?.path) return;
+async function handleUpload(files, folder = state.collection?.path) {
+  if (!files.length || !folder) return;
   let added = 0;
   let failed = 0;
   for (const file of files) {
     try {
       const response = await fetch(
-        `/api/upload?path=${encodeURIComponent(state.collection.path)}&t=${encodeURIComponent(TOKEN)}`,
+        `/api/upload?path=${encodeURIComponent(folder)}&t=${encodeURIComponent(TOKEN)}`,
         {
           method: "POST",
           headers: {
@@ -1200,7 +1227,11 @@ async function handleUpload(files) {
     }
   }
   toast(failed ? `Загружено: ${added}, ошибок: ${failed}` : `Загружено треков: ${added}`);
-  await openFolder(state.collection.path, false);
+  if (state.view === "folder" && state.collection?.path === folder) {
+    await openFolder(folder, false);
+  } else if (state.view === "folders") {
+    await renderFolders();
+  }
   await loadTracks();
 }
 
@@ -1308,12 +1339,16 @@ function switchView(view) {
 }
 
 /* ---------------------------------------------------------------- online */
-async function openOnline() {
+async function loadFolders() {
   try {
     state.folders = (await API.get("folders")).folders;
   } catch (error) {
     /* keep the folders we already know */
   }
+}
+
+async function openOnline() {
+  await loadFolders();
   if (!state.onlineFolder) state.onlineFolder = state.folders[0]?.path || "";
   renderOnline();
 }
@@ -2183,6 +2218,17 @@ async function loadPreferences() {
     if (prefs["ui.accent"]) state.accent = prefs["ui.accent"];
     if (prefs["ui.base"]) state.base = prefs["ui.base"];
     if (prefs["ui.downloadFolder"]) state.onlineFolder = prefs["ui.downloadFolder"];
+    if (prefs["ui.queue"]) {
+      try {
+        const saved = JSON.parse(prefs["ui.queue"]);
+        if (Array.isArray(saved) && saved.length) {
+          state.queue = saved.filter((id) => Number.isInteger(id));
+          state.queueIndex = -1;
+        }
+      } catch (error) {
+        /* a broken saved queue must not block startup */
+      }
+    }
   } catch (error) {
     /* first launch: keep the defaults */
   }
@@ -2727,6 +2773,39 @@ el.queueList.addEventListener("drop", (event) => {
   queueDragIndex = null;
 });
 
+let playlistDragIndex = null;
+el.view.addEventListener("dragstart", (event) => {
+  if (state.view !== "playlist") return;
+  const row = event.target.closest("[data-playlist-index]");
+  if (!row) return;
+  playlistDragIndex = Number(row.dataset.playlistIndex);
+  row.classList.add("dragging");
+});
+el.view.addEventListener("dragend", (event) => {
+  event.target.closest("[data-playlist-index]")?.classList.remove("dragging");
+  playlistDragIndex = null;
+});
+el.view.addEventListener("dragover", (event) => {
+  if (state.view === "playlist" && playlistDragIndex !== null) event.preventDefault();
+});
+el.view.addEventListener("drop", async (event) => {
+  if (state.view !== "playlist" || playlistDragIndex === null) return;
+  const row = event.target.closest("[data-playlist-index]");
+  const source = playlistDragIndex;
+  playlistDragIndex = null;
+  if (!row) return;
+  event.preventDefault();
+  const target = Number(row.dataset.playlistIndex);
+  const playlistId = state.playlist?.playlist?.id;
+  if (!playlistId || source === target) return;
+  try {
+    await API.post(`playlists/${playlistId}/move`, { from: source, to: target });
+    await openPlaylist(playlistId);
+  } catch (error) {
+    toast("Не удалось изменить порядок");
+  }
+});
+
 el.npLyricsToggle.addEventListener("click", toggleLyrics);
 el.settingBackupClear.addEventListener("click", clearBackups);
 el.lyricsText.addEventListener("input", updateLyricsFormat);
@@ -2736,6 +2815,48 @@ el.uploadFiles.addEventListener("change", async () => {
   if (files.length) await handleUpload(files);
 });
 loadPreferences();
+
+let dragDepth = 0;
+
+function draggingFiles(event) {
+  return Array.from(event.dataTransfer?.types || []).includes("Files");
+}
+
+window.addEventListener("dragenter", (event) => {
+  if (!draggingFiles(event)) return;
+  dragDepth += 1;
+  el.dropOverlay.hidden = false;
+});
+window.addEventListener("dragover", (event) => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+});
+window.addEventListener("dragleave", () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) el.dropOverlay.hidden = true;
+});
+window.addEventListener("drop", async (event) => {
+  if (!draggingFiles(event)) return;
+  event.preventDefault();
+  dragDepth = 0;
+  el.dropOverlay.hidden = true;
+  const files = [...(event.dataTransfer?.files || [])].filter((file) =>
+    /\.(mp3|flac|m4a|m4b|mp4|ogg|oga|opus|aac|wav)$/i.test(file.name)
+  );
+  if (!files.length) {
+    toast("Это не аудиофайлы — папку целиком добавьте в разделе «Папки»");
+    return;
+  }
+  const folder =
+    state.view === "folder" && state.collection?.path
+      ? state.collection.path
+      : state.folders[0]?.path;
+  if (!folder) {
+    toast("Сначала добавьте папку в библиотеку");
+    return;
+  }
+  await handleUpload(files, folder);
+});
 
 window.addEventListener("focus", () => {
   refreshCurrentView();
@@ -2797,4 +2918,5 @@ if ("mediaSession" in navigator) {
 
 el.audio.volume = 0.8;
 
+loadFolders();
 loadTracks();

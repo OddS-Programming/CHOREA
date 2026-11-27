@@ -417,6 +417,21 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"id": playlist_id, "name": name})
             return
 
+        playlist_move = re.match(r"^/api/playlists/(\d+)/move$", path)
+        if playlist_move:
+            payload = self._read_json()
+            try:
+                source = int(payload.get("from"))
+                target = int(payload.get("to"))
+            except (TypeError, ValueError):
+                self._error(400, "from and to are required")
+                return
+            moved = self.context.library.reorder_playlist(
+                int(playlist_move.group(1)), source, target
+            )
+            self._json({"ok": moved})
+            return
+
         playlist_track = re.match(r"^/api/playlists/(\d+)/tracks$", path)
         if playlist_track:
             payload = self._read_json()

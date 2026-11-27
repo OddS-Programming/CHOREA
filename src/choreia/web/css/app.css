@@ -1076,6 +1076,23 @@ body.np-open .queue-panel { bottom: 0; }
 }
 .dup-size { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
 
+/* ------------------------------------------------------------------- drop */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  border: 2px dashed var(--accent);
+  color: #f6f6fa;
+  font-size: 16px;
+  pointer-events: none;
+  backdrop-filter: blur(2px);
+}
+.row[draggable="true"] { cursor: grab; }
+.row.dragging { opacity: 0.45; }
+
 .theme-choices { display: flex; gap: 8px; flex-wrap: wrap; }
 .theme-choice {
   display: inline-flex;
